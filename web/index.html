@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0c0e0f" />
+    <link rel="icon" href="/icons/radio-tower.svg" />
+    <title>IoT Hardware Connectivity Bench</title>
+    <link rel="stylesheet" href="/styles.css?v=16" />
+  </head>
+  <body>
+    <div id="global-progress" class="global-progress" role="progressbar" aria-label="Bench operation in progress"><span></span></div>
+    <header class="topbar">
+      <div class="brand-block"><span class="brand-mark" aria-hidden="true"></span><div><h1>IoT Hardware Connectivity Bench</h1><p>USB, camera and wireless validation</p></div></div>
+      <div class="overall-state" aria-live="polite"><span id="overall-dot" class="status-dot"></span><div><strong id="overall-label">Waiting for device</strong><span id="device-name">USB bridge offline</span></div></div>
+    </header>
+
+    <nav class="workspace-nav" aria-label="Hardware bench workflow">
+      <div class="workspace-track" role="tablist">
+        <button class="workspace-tab active" type="button" role="tab" aria-selected="true" data-workspace-tab="host"><span>1</span><strong>Host &amp; devices</strong><small>Discover interfaces</small></button>
+        <button class="workspace-tab" type="button" role="tab" aria-selected="false" data-workspace-tab="device"><span>2</span><strong>Selected device</strong><small>Identify hardware</small></button>
+        <button class="workspace-tab" type="button" role="tab" aria-selected="false" data-workspace-tab="pins"><span>3</span><strong>Pins &amp; buses</strong><small>Inspect connections</small></button>
+        <button class="workspace-tab" type="button" role="tab" aria-selected="false" data-workspace-tab="tests"><span>4</span><strong>Tests</strong><small>Verify capabilities</small></button>
+        <button class="workspace-tab" type="button" role="tab" aria-selected="false" data-workspace-tab="firmware"><span>5</span><strong>Firmware &amp; files</strong><small>Build, edit and flash</small></button>
+        <button class="workspace-tab" type="button" role="tab" aria-selected="false" data-workspace-tab="tools"><span>6</span><strong>Tools &amp; sources</strong><small>Inspect providers</small></button>
+      </div>
+    </nav>
+
+    <main>
+      <section class="camera-section" data-workspace="device" aria-labelledby="camera-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">Live input</p><h2 id="camera-title">Camera</h2></div><div class="camera-metrics"><span><strong id="fps">0.0</strong> FPS</span><span><strong id="frames">0</strong> frames</span><span>VGA JPEG</span><button id="camera-refresh" class="icon-button" type="button" title="Refresh camera" aria-label="Refresh camera"><img src="/icons/refresh-cw.svg" alt="" /></button></div></div>
+        <div class="camera-viewport"><img id="camera-feed" data-stream-src="/api/camera/stream.mjpeg" alt="Live camera stream from selected device" /><div class="camera-empty"><strong id="camera-empty-message">No camera detected for selected hardware</strong></div><div class="feed-badge"><span></span> USB LIVE</div></div>
+      </section>
+
+      <aside class="device-link" data-workspace="device" aria-label="Selected hardware" hidden>
+        <div class="section-heading"><div><p class="eyebrow">Control link</p><h2>Selected hardware</h2></div></div>
+        <div class="link-primary"><span class="icon-tile"><img src="/icons/usb.svg" alt="" /></span><div><strong id="usb-port">No port</strong><span id="link-device-name">Waiting for telemetry</span></div><span id="usb-state" class="state-label">Offline</span></div>
+        <dl class="link-stats"><div><dt>Packets</dt><dd id="packets">0</dd></div><div><dt>Received</dt><dd id="bytes">0 B</dd></div><div><dt>Device protocol</dt><dd id="protocol-state">Waiting</dd></div></dl>
+        <div class="radio-overview">
+          <div class="radio-channel"><img src="/icons/bluetooth.svg" alt="" /><span class="radio-channel-body"><strong>Bluetooth (BLE)</strong><small id="ble-address">No compatible telemetry</small><span class="direction-states"><span title="The selected device is sending a BLE advertisement"><i id="ble-out-dot" class="mini-dot"></i>Broadcast <b id="ble-out-state">Off</b></span><span title="An external BLE client is connected to the selected device"><i id="ble-in-dot" class="mini-dot"></i>Incoming <b id="ble-in-state">Waiting</b></span><span title="This computer has verified a data link to a nearby BLE device"><i id="ble-read-dot" class="mini-dot"></i>Computer link <b id="ble-read-state">None</b></span></span></span></div>
+          <div class="radio-channel"><img src="/icons/wifi.svg" alt="" /><span class="radio-channel-body"><strong>Wi-Fi</strong><small id="wifi-network">No compatible telemetry</small><span class="direction-states"><span title="The selected device is sending a direct Wi-Fi signal"><i id="wifi-out-dot" class="mini-dot"></i>Broadcast <b id="wifi-out-state">Off</b></span><span title="A phone, tablet, or computer is connected to the selected device's direct Wi-Fi"><i id="wifi-client-dot" class="mini-dot"></i>Incoming <b id="wifi-client-state">Waiting</b></span><span title="The selected device has connected outward to a Wi-Fi router"><i id="wifi-in-dot" class="mini-dot"></i>Internet <b id="wifi-in-state">Offline</b></span></span></span></div>
+        </div>
+      </aside>
+
+      <section class="wireless" data-workspace="tests" aria-labelledby="wireless-title" hidden>
+        <div class="wireless-header"><div><p class="eyebrow">Wireless controls for selected hardware</p><h2 id="wireless-title">Connections</h2></div><span id="active-radio-label" class="status-badge online">Bluetooth (BLE)</span></div>
+        <div class="device-radio-selector"><span id="wireless-capability-message">Select a supported wireless connection</span><div class="tab-list" role="tablist" aria-label="Wireless connection"><button class="tab active" type="button" role="tab" aria-selected="true" data-radio-tab="ble"><img src="/icons/bluetooth.svg" alt="" />Bluetooth (BLE)</button><button class="tab" type="button" role="tab" aria-selected="false" data-radio-tab="wifi"><img src="/icons/wifi.svg" alt="" />Wi-Fi</button></div></div>
+
+        <div id="ble-panel" class="radio-panel" role="tabpanel">
+          <div class="mode-label">Select BLE operation</div><div class="mode-switch" role="tablist" aria-label="Bluetooth operation"><button class="active" type="button" data-mode-group="ble" data-mode="access" title="Send a connectable BLE signal from the selected device">Broadcast BLE from device</button><button type="button" data-mode-group="ble" data-mode="nearby" title="Use this computer to read nearby BLE advertisements">Read nearby BLE with computer</button></div>
+          <div id="ble-access" class="mode-view">
+            <div class="connection-summary"><div class="summary-identity"><span class="icon-tile success"><img src="/icons/radio-tower.svg" alt="" /></span><div><span>Bluetooth (BLE) broadcast name</span><strong id="ble-broadcast-name">Awaiting device</strong></div></div><span id="ble-broadcast-status" class="status-badge">Off</span><dl><div><dt>Profile</dt><dd>Connectable GATT</dd></div><div><dt>Connected clients</dt><dd id="ble-client-count">0</dd></div><div><dt>Verified sessions</dt><dd id="ble-connections-total">0</dd></div><div><dt>Device address</dt><dd id="ble-device-address">--</dd></div><div><dt>Service</dt><dd id="ble-service-id">--</dd></div></dl><p id="ble-quality" class="connection-note">Waiting for compatible radio telemetry</p></div>
+            <div class="toolbar"><button id="ble-power" class="tool-button" type="button" title="Start or stop the BLE signal sent by the selected device"><img src="/icons/power.svg" alt="" /><span>Start BLE broadcast</span></button><button id="ble-settings" class="tool-button" type="button"><img src="/icons/settings.svg" alt="" /><span>Broadcast settings</span></button></div>
+          </div>
+          <div id="ble-nearby" class="mode-view" hidden>
+            <div class="view-heading"><div><h3>BLE advertisements read by this computer</h3><p id="ble-rssi">Select a nearby BLE device to inspect its signal</p></div><button id="rescan-button" class="primary-action" type="button"><img src="/icons/search.svg" alt="" />Scan with computer</button></div>
+            <div id="ble-progress" class="operation-progress" role="progressbar" aria-label="Bluetooth scan progress" hidden><span></span></div><p id="ble-command-status" class="control-status" role="status"></p><div id="ble-devices" class="discovery-list"><p>No scan results yet</p></div><div class="selection-actions"><button id="ble-connect" class="primary-action" type="button" disabled><img src="/icons/plug-zap.svg" alt="" />Verify selected LUMNI device</button></div>
+          </div>
+        </div>
+
+        <div id="wifi-panel" class="radio-panel" role="tabpanel" hidden>
+          <div class="mode-label">Select Wi-Fi operation</div><div class="mode-switch" role="tablist" aria-label="Wi-Fi operation"><button class="active" type="button" data-mode-group="wifi" data-mode="access" title="Send a direct Wi-Fi signal from the selected device">Broadcast Wi-Fi from device</button><button type="button" data-mode-group="wifi" data-mode="nearby" title="Connect the selected device to a nearby router">Connect device to Wi-Fi</button></div>
+          <div id="wifi-access" class="mode-view">
+            <div class="connection-summary"><div class="summary-identity"><span class="icon-tile warning"><img src="/icons/router.svg" alt="" /></span><div><span>Direct Wi-Fi broadcast name</span><strong id="wifi-broadcast-name">Awaiting device</strong></div></div><span id="wifi-broadcast-status" class="status-badge warning">Off</span><dl><div><dt>Band</dt><dd>2.4 GHz</dd></div><div><dt>Connected clients</dt><dd id="wifi-client-count">0</dd></div><div><dt>Device address</dt><dd id="wifi-ap-address">--</dd></div><div><dt>Security</dt><dd>Password protected</dd></div></dl><p class="connection-note">Direct Wi-Fi signal sent by the selected device for a phone, tablet, or computer to join.</p></div>
+            <div class="toolbar"><button id="wifi-power" class="tool-button" type="button" title="Start or stop the direct Wi-Fi signal sent by the selected device"><img src="/icons/power.svg" alt="" /><span>Start Wi-Fi broadcast</span></button><button id="wifi-toggle" class="tool-button" type="button"><img src="/icons/settings.svg" alt="" /><span>Broadcast settings</span></button></div><p id="wifi-command-status" class="control-status" role="status"></p>
+          </div>
+          <div id="wifi-nearby" class="mode-view" hidden>
+            <div id="wifi-current" class="current-connection"><span class="icon-tile"><img src="/icons/wifi.svg" alt="" /></span><div><span>Selected device internet link</span><strong id="wifi-current-name">Not connected</strong><small id="wifi-detail">No router address</small></div><span id="wifi-current-status" class="status-badge">Offline</span></div>
+            <div class="internet-verification"><div class="verification-heading"><div><strong>Internet traffic verification</strong><span id="internet-probe-detail">Connect the device to a router before testing</span></div><span id="internet-probe-status" class="status-badge">Not tested</span></div><dl class="internet-stats"><div><dt>Gateway</dt><dd id="wifi-gateway">--</dd></div><div><dt>DNS</dt><dd id="wifi-dns">--</dd></div><div><dt>Round trip</dt><dd id="internet-latency">--</dd></div><div><dt>Test traffic</dt><dd id="internet-traffic">0 B out / 0 B in</dd></div></dl><button id="internet-test" class="tool-button" type="button" title="Send a small HTTP request from the selected device to verify Internet access"><img src="/icons/signal.svg" alt="" /><span>Test Internet traffic</span></button><p id="internet-test-message" class="control-status" role="status"></p></div>
+            <div class="scanner-grid"><div><strong>Selected device radio</strong><span id="device-wifi-capability">Compatible firmware: 2.4 GHz</span></div><div><strong>Computer radio</strong><span id="host-wifi-capability">Checking 2.4/5 GHz capability</span></div></div>
+            <div class="view-heading"><div><h3>Wi-Fi networks available to the selected device</h3><p id="wifi-rssi">Select a network for the device to join</p></div><div class="heading-actions"><button id="wifi-refresh" class="primary-action" type="button"><img src="/icons/search.svg" alt="" />Scan with device</button><button id="host-wifi-refresh" class="tool-button" type="button" title="Inventory 2.4 and 5 GHz networks using the computer's Wi-Fi adapter"><img src="/icons/monitor-smartphone.svg" alt="" /><span>Scan computer</span></button><button id="wifi-hidden" class="tool-button" type="button"><img src="/icons/wifi.svg" alt="" /><span>Hidden network</span></button></div></div>
+            <div id="wifi-progress" class="operation-progress" role="progressbar" aria-label="Wi-Fi operation progress" hidden><span></span></div><div id="wifi-networks" class="discovery-list"><p>No device scan results yet</p></div><div id="host-wifi-networks" class="discovery-list host-list"><p>Computer radio capability not checked</p></div>
+            <form id="wifi-form" class="connection-form" hidden><div class="form-heading"><div><span>Connect selected device to</span><strong id="wifi-form-network">Network</strong></div><button id="wifi-cancel" class="icon-button" type="button" title="Close" aria-label="Close network form"><img src="/icons/circle-x.svg" alt="" /></button></div><label>Network name<input id="wifi-ssid" name="ssid" autocomplete="off" required maxlength="32" /></label><label>Password<span class="password-field"><input id="wifi-password" name="password" type="password" autocomplete="new-password" maxlength="63" /><button id="password-toggle" class="password-toggle" type="button" aria-label="Show password" aria-pressed="false" title="Show password"><img src="/icons/eye.svg" alt="" /></button></span></label><label class="remember-control"><input id="wifi-remember" type="checkbox" checked /> Remember this network on the selected device</label><div class="form-actions"><button id="wifi-connect" type="submit" class="primary-action"><img src="/icons/plug-zap.svg" alt="" />Connect device</button></div><p id="wifi-message" role="status"></p></form>
+          </div>
+        </div>
+      </section>
+
+      <section class="telemetry" data-workspace="device" aria-labelledby="telemetry-title" hidden><div class="section-heading"><div><p class="eyebrow">Compatible device adapter</p><h2 id="telemetry-title">Telemetry reported by selected device</h2></div><span id="updated-at">No compatible data received</span></div><div class="telemetry-grid"><div><span>Firmware / OS</span><strong id="firmware">--</strong></div><div><span>Camera</span><strong id="camera-status">--</strong></div><div><span>Free memory / heap</span><strong id="heap">--</strong></div><div><span>PSRAM</span><strong id="psram">--</strong></div><div><span>Uptime</span><strong id="uptime">--</strong></div><div><span>Radio clients</span><strong id="ap-clients">--</strong></div></div></section>
+
+      <section class="device-intelligence" data-workspace="device" aria-labelledby="intelligence-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">Evidence-based inspection</p><h2 id="intelligence-title">Device identity and capabilities</h2></div><button id="device-inspect-refresh" class="icon-button" type="button" title="Refresh selected device inspection" aria-label="Refresh selected device inspection"><img src="/icons/refresh-cw.svg" alt="" /></button></div>
+        <p id="intelligence-message" class="inline-message left-message" role="status">Select a detected interface to inspect it.</p>
+        <dl class="identity-grid"><div><dt>Identified model</dt><dd id="intelligence-model">--</dd></div><div><dt>Device class</dt><dd id="intelligence-class">--</dd></div><div><dt>MCU / SoC</dt><dd id="intelligence-mcu">--</dd></div><div><dt>Runtime / OS</dt><dd id="intelligence-runtime">--</dd></div><div><dt>Confidence</dt><dd id="intelligence-confidence">--</dd></div></dl>
+        <form id="device-model-form" class="model-form" hidden><label for="device-model-select">Choose the exact board model when USB identity only proves a family</label><div><select id="device-model-select"></select><button class="primary-action" type="submit">Save model</button></div></form>
+        <div id="identity-layers-wrap" class="table-wrap identity-layer-table" hidden><table><thead><tr><th>Layer</th><th>Identified hardware</th><th>Evidence</th><th>Status</th></tr></thead><tbody id="identity-layers-body"></tbody></table></div>
+        <div class="inspection-columns">
+          <details open><summary><span>Evidence</span><b id="evidence-count">0</b></summary><div id="device-evidence" class="inspection-list"><p>No evidence collected</p></div></details>
+          <details open><summary><span>Components and sensors</span><b id="component-count">0</b></summary><div id="device-components" class="component-grid"><p>No components identified</p></div></details>
+          <details><summary><span>Capabilities and services</span><b id="capability-count">0</b></summary><div id="device-capabilities" class="inspection-list"></div><div id="device-services" class="inspection-list"></div></details>
+          <details><summary><span>External buses and terminal connections</span><b id="connection-interface-count">0</b></summary><div id="device-connection-interfaces" class="inspection-list"><p>No interfaces identified</p></div></details>
+          <details><summary><span>Documentation and sources</span><b id="resource-count">0</b></summary><div id="device-resources" class="resource-list"><p>No resources matched</p></div></details>
+        </div>
+      </section>
+
+      <section class="pin-workspace" data-workspace="pins" aria-labelledby="pins-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">Board connection map</p><h2 id="pins-title">Pins, buses and attached peripherals</h2></div><div class="test-heading-actions"><span id="pin-adapter" class="status-badge">No adapter</span><button id="pins-refresh" class="icon-button" type="button" title="Refresh pin and bus evidence" aria-label="Refresh pin and bus evidence"><img src="/icons/refresh-cw.svg" alt="" /></button></div></div>
+        <p id="pins-message" class="section-intro" role="status">Inspect a compatible device to load its connection map.</p>
+        <dl class="runtime-grid"><div><dt>Runtime</dt><dd id="runtime-firmware">--</dd></div><div><dt>Storage</dt><dd id="runtime-storage">--</dd></div><div><dt>Free storage</dt><dd id="runtime-storage-free">--</dd></div><div><dt>Free heap</dt><dd id="runtime-heap">--</dd></div><div><dt>CPU clock</dt><dd id="runtime-frequency">--</dd></div><div><dt>Program</dt><dd id="runtime-code">--</dd></div></dl>
+        <div id="runtime-artifacts" class="runtime-artifacts"><span>No runtime modules reported.</span></div>
+        <div class="probe-toolbar"><div><strong>Controlled device probe</strong><small id="probe-boundary">No compatible runtime adapter detected.</small></div><button id="runtime-probe" class="tool-button danger-action" type="button" disabled>Run deep probe</button><button id="i2c-probe" class="tool-button" type="button" disabled>Scan I2C bus</button></div>
+        <div class="pin-layout">
+          <div><div class="subsection-heading"><h3>Board pins</h3><span id="pin-count">0 pins</span></div><div id="pin-groups" class="pin-groups"><p class="empty-state">No pin map available.</p></div></div>
+          <div><div class="subsection-heading"><h3>Attached peripherals</h3><span id="peripheral-count">0 detected</span></div><div id="attached-peripherals" class="peripheral-list"><p class="empty-state">No bus scan has run.</p></div></div>
+        </div>
+      </section>
+
+      <section class="generic-tests" data-workspace="tests" aria-labelledby="generic-tests-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">Controlled verification</p><h2 id="generic-tests-title">Tests for selected hardware</h2></div><div class="test-heading-actions"><button id="tests-refresh" class="icon-button" type="button" title="Refresh live test availability" aria-label="Refresh live test availability"><img src="/icons/refresh-cw.svg" alt="" /></button><span id="test-count" class="status-badge">0 ready</span></div></div>
+        <p class="section-intro">Only tests supported by current evidence are enabled. Disruptive and destructive operations stay locked until a compatible adapter and explicit approval are available.</p>
+        <div id="device-tests" class="test-list"><p>No device has been inspected yet.</p></div>
+      </section>
+
+      <section class="firmware-workspace" data-workspace="firmware" aria-labelledby="firmware-workspace-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">Controlled target workspace</p><h2 id="firmware-workspace-title">Firmware, source files, and target operations</h2></div><button id="firmware-refresh" class="icon-button" type="button" title="Refresh firmware workspace" aria-label="Refresh firmware workspace"><img src="/icons/refresh-cw.svg" alt="" /></button></div>
+        <p id="firmware-message" class="section-intro" role="status">Select and inspect a device to load target-aware operations.</p>
+        <div id="firmware-operations" class="firmware-operation-grid"><p>No target operations loaded.</p></div>
+        <div class="firmware-files-heading"><div><p class="eyebrow">Allowlisted source access</p><h3>Project and mounted-device files</h3></div><button id="firmware-save" class="tool-button" type="button" disabled><img src="/icons/circle-check.svg" alt="" />Review &amp; save</button></div>
+        <div class="firmware-files"><aside id="firmware-file-list"><p>No files loaded.</p></aside><div class="firmware-editor"><header><strong id="firmware-file-name">Select a source file</strong><span id="firmware-file-hash">Binary files are excluded</span></header><textarea id="firmware-file-content" aria-label="Firmware source editor" spellcheck="false" disabled></textarea></div></div>
+        <div class="firmware-history"><div class="firmware-files-heading"><div><p class="eyebrow">Immutable evidence trail</p><h3>Operation receipts</h3></div></div><div class="table-wrap"><table><thead><tr><th>Time</th><th>Operation</th><th>Risk</th><th>Status</th><th>Evidence</th></tr></thead><tbody id="firmware-history-body"><tr><td colspan="5">No operations recorded.</td></tr></tbody></table></div></div>
+      </section>
+
+      <section class="interfaces" data-workspace="host" aria-labelledby="interfaces-title"><div class="section-heading"><div><p class="eyebrow">Host hardware</p><h2 id="interfaces-title">Detected devices and interfaces</h2></div><div class="port-controls"><label for="port-select">Selected interface</label><select id="port-select" aria-label="Selected hardware"></select><button id="hardware-refresh" class="icon-button" type="button" title="Refresh detected ports and USB network interfaces" aria-label="Refresh detected hardware"><img src="/icons/refresh-cw.svg" alt="" /></button><button id="port-connect" class="primary-action inspect-action" type="button"><img src="/icons/search.svg" alt="" /><span>Inspect IoT device</span></button></div></div><p id="port-message" class="inline-message" role="status"></p><dl class="port-profile"><div><dt>Profile</dt><dd id="profile-name">No device selected</dd></div><div><dt>Transport</dt><dd id="profile-transport">--</dd></div><div><dt>USB identity</dt><dd id="profile-usb">--</dd></div><div><dt>Classification</dt><dd id="profile-role">--</dd></div></dl><div id="network-device-services" class="network-device-services" hidden><span id="network-service-status"></span><a id="network-web-link" class="tool-button" href="#" target="_blank" rel="noreferrer"><img src="/icons/monitor-smartphone.svg" alt="" /><span>Open device web interface</span></a></div><div class="table-wrap"><table><thead><tr><th>Interface</th><th>Device</th><th>USB identity</th><th>Transport</th><th>Selection</th></tr></thead><tbody id="ports-body"><tr><td colspan="5">Loading connected hardware...</td></tr></tbody></table></div></section>
+
+      <section class="diagnostics" data-workspace="host" aria-labelledby="diagnostics-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">Host discovery</p><h2 id="diagnostics-title">Computer, USB and local services</h2></div>
+          <div class="heading-actions">
+            <button id="diagnostics-refresh" class="icon-button" type="button" title="Refresh passive inventory" aria-label="Refresh passive inventory"><img src="/icons/refresh-cw.svg" alt="" /></button>
+            <button id="service-scan" class="tool-button" type="button" title="Scan the local network for advertised HTTP, SSH, camera, and MQTT services"><img src="/icons/search.svg" alt="" /><span>Scan local services</span></button>
+          </div>
+        </div>
+        <p id="diagnostics-message" class="inline-message" role="status">Loading non-invasive host and USB inventory...</p>
+        <div class="host-accordions">
+          <details open><summary><span>USB identities</span><b id="usb-inventory-summary">Waiting for scan</b></summary><div class="table-wrap"><table><thead><tr><th>Device</th><th>USB identity</th><th>Class</th><th>Bus</th></tr></thead><tbody id="usb-inventory-body"><tr><td colspan="4">Loading...</td></tr></tbody></table></div></details>
+          <details><summary><span>Host network interfaces</span><b id="host-inventory-summary">Waiting for scan</b></summary><div class="table-wrap"><table><thead><tr><th>Interface</th><th>State</th><th>Speed</th><th>Addresses</th></tr></thead><tbody id="host-inventory-body"><tr><td colspan="4">Loading...</td></tr></tbody></table></div></details>
+          <details><summary><span>Local advertised services</span><b id="service-summary">Not scanned</b></summary><div id="service-results" class="discovery-list"><p>No service scan has run</p></div></details>
+          <details><summary><span>Devices on private local networks</span><b id="network-discovery-summary">Not scanned</b></summary><div class="network-scan-controls"><label>Optional exact IPv4 target<input id="network-target" inputmode="decimal" placeholder="192.168.5.178" /></label><button id="network-scan" class="tool-button" type="button"><img src="/icons/search.svg" alt="" /><span>Scan known devices</span></button><button id="network-deep-scan" class="tool-button danger-action" type="button"><img src="/icons/radio-tower.svg" alt="" /><span>Deep local scan</span></button></div><p class="scan-boundary">Private local networks only. Deep mode is capped to /24 and checks a fixed service-port list without application payloads.</p><div id="network-discovery-results" class="network-device-list"><p>No network-device scan has run.</p></div></details>
+        </div>
+      </section>
+
+      <section class="toolchain" data-workspace="tools" aria-labelledby="toolchain-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">Extensible discovery engine</p><h2 id="toolchain-title">Tools and metadata sources</h2></div><button id="tools-refresh" class="icon-button" type="button" title="Refresh tool and provider status" aria-label="Refresh tools and providers"><img src="/icons/refresh-cw.svg" alt="" /></button></div>
+        <p class="section-intro">Providers enrich identity and documentation. Local probes remain the source of truth for connected hardware and verified capabilities.</p>
+        <div class="host-accordions">
+          <details open><summary><span>Metadata providers</span><b id="provider-summary">Checking sources</b></summary><div id="metadata-providers" class="provider-grid"><p>Loading providers...</p></div></details>
+          <details open><summary><span>Bench command-line tools</span><b id="tool-summary">Checking installed capabilities</b></summary><div class="table-wrap"><table><thead><tr><th>Tool</th><th>Purpose</th><th>Risk</th><th>Status</th></tr></thead><tbody id="tool-registry-body"><tr><td colspan="4">Loading...</td></tr></tbody></table></div></details>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="access-dialog"><form id="access-form" class="dialog-form"><div class="dialog-heading"><div><p class="eyebrow">Signals sent by selected device</p><h2>Broadcast settings</h2></div><button id="access-close" class="icon-button" type="button" title="Close" aria-label="Close settings"><img src="/icons/circle-x.svg" alt="" /></button></div><label>Bluetooth (BLE) and direct Wi-Fi name<input id="access-name" required maxlength="24" /></label><label>New direct Wi-Fi password <small>(optional)</small><span class="password-field"><input id="access-password" type="password" minlength="8" maxlength="63" autocomplete="new-password" placeholder="Leave blank to keep the current password" /><button id="access-password-toggle" class="password-toggle" type="button" aria-label="Show password" aria-pressed="false" title="Show password"><img src="/icons/eye.svg" alt="" /></button></span></label><p class="dialog-note">There is no username or user account. A fresh firmware install uses <strong>lumni-camera</strong>. Leave this blank to keep the current password. Applying changes restarts both broadcasts.</p><div class="form-actions"><button class="primary-action" type="submit"><img src="/icons/circle-check.svg" alt="" />Apply settings</button><button id="access-cancel" class="tool-button" type="button"><span>Cancel</span></button></div><p id="access-message" role="status"></p></form></dialog>
+
+    <footer><span>Test protocol 0.4</span><span id="bridge-uptime">Bridge uptime 0s</span></footer>
+    <aside id="diagnostic-console" class="diagnostic-console" aria-label="Diagnostic console"><button id="console-toggle" class="console-toggle" type="button"><img src="/icons/monitor-smartphone.svg" alt="" /><strong>Diagnostic console</strong><span id="console-event-count">0 events</span><b>⌃</b></button><div id="console-body" class="console-body" hidden><div class="console-toolbar"><select id="console-command" aria-label="Read-only target diagnostic"><option value="system_summary">System summary</option><option value="network_interfaces">Network interfaces</option><option value="usb_devices">USB devices</option><option value="i2c_adapters">I2C adapters</option><option value="media_devices">Media devices</option></select><button id="console-run" class="tool-button" type="button">Run read-only command</button><button id="console-clear" class="tool-button" type="button">Clear</button></div><p id="console-note" class="scan-boundary">Select a compatible operating-system target to enable commands. Bench events remain visible for every device.</p><div id="console-output" class="console-output" role="log" aria-live="polite"><p>No bench events yet.</p></div></div></aside>
+    <script src="/app.js?v=31" defer></script>
+  </body>
+</html>

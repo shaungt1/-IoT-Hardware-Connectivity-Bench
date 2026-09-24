@@ -1,0 +1,14 @@
+.venv/
+.tools/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+ai-api/data/*.db*
+react-app/node_modules/
+react-app/dist/
+react-app/artifacts/
+react-app/*.tsbuildinfo
+react-app/vite.config.js
+react-app/vite.config.d.ts
+.pio/
+firmware/.pio/
