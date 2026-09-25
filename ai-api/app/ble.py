@@ -6,12 +6,12 @@ from typing import Any
 
 from bleak import BleakClient, BleakScanner
 
-LUMNI_TEST_SERVICE_UUID = "8f7a0001-6e7d-4a44-9f9d-10a1b2c3d401"
-LUMNI_TEST_STATUS_UUID = "8f7a0002-6e7d-4a44-9f9d-10a1b2c3d401"
+BENCH_SERVICE_UUID = "8f7a0001-6e7d-4a44-9f9d-10a1b2c3d401"
+BENCH_STATUS_UUID = "8f7a0002-6e7d-4a44-9f9d-10a1b2c3d401"
 
 
 class BleMonitor:
-    def __init__(self, name_prefix: str = "LUMNI-IOT-") -> None:
+    def __init__(self, name_prefix: str = "XIAO-ESP32S3-SENSE-") -> None:
         self._name_prefix = name_prefix
         self._state: dict[str, Any] = {
             "detected": False,
@@ -42,9 +42,9 @@ class BleMonitor:
                         "address": device.address,
                         "rssi_dbm": advertisement.rssi,
                         "service_uuids": advertisement.service_uuids,
-                        "is_lumni": (device.name or "").startswith(self._name_prefix)
+                        "is_compatible": (device.name or "").startswith(self._name_prefix)
                         or (advertisement.local_name or "").startswith(self._name_prefix)
-                        or LUMNI_TEST_SERVICE_UUID
+                        or BENCH_SERVICE_UUID
                         in [uuid.lower() for uuid in advertisement.service_uuids],
                     }
                     for device, advertisement in devices.values()
@@ -57,7 +57,7 @@ class BleMonitor:
                 for device, advertisement in devices.values()
                 if (device.name or "").startswith(self._name_prefix)
                 or (advertisement.local_name or "").startswith(self._name_prefix)
-                or LUMNI_TEST_SERVICE_UUID in [uuid.lower() for uuid in advertisement.service_uuids]
+                or BENCH_SERVICE_UUID in [uuid.lower() for uuid in advertisement.service_uuids]
             ]
             match = max(matches, key=lambda item: item[1].rssi) if matches else None
             async with self._lock:
@@ -98,10 +98,10 @@ class BleMonitor:
                 scan_result = await self._scan(6.0)
                 address = scan_result["address"] if scan_result["detected"] else None
             if not address:
-                return {"verified": False, "error": "LUMNI BLE advertisement was not detected"}
+                return {"verified": False, "error": "A compatible IoT Bench BLE advertisement was not detected"}
             try:
                 async with BleakClient(address, timeout=12.0) as client:
-                    payload = await client.read_gatt_char(LUMNI_TEST_STATUS_UUID)
+                    payload = await client.read_gatt_char(BENCH_STATUS_UUID)
                 connected_at = time.time()
                 async with self._lock:
                     self._state["connection_verified"] = True

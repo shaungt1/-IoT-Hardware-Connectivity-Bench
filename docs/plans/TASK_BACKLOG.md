@@ -1,5 +1,9 @@
 # Product Task Backlog
 
+> This is the exhaustive design backlog, not the current completion ledger. Use
+> `REQUIREMENT_EXECUTION_LEDGER_2026-09-24.md` for verified status; unchecked historical rows may already
+> have an implemented baseline and remain here when their full cross-vendor or release gate is unfinished.
+
 Status: initial execution backlog  
 Date: 2026-09-24
 
@@ -72,6 +76,7 @@ the product contract before broad vendor, simulation, or hosted work.
 | [ ] | UX-008 | P1 | QA-005 | Audit table spacing, wrapping, links, cards, and empty states | No overlap/cramping; service URLs are explicit and reachable |
 | [ ] | UX-009 | P1 | CORE-008 | Add collapsible target-labeled event/terminal drawer | Streams show source, state, timestamps, and bounded history |
 | [ ] | UX-010 | P0 | all React feature tasks | Retire React parity gaps while preserving HTML validation client | Required workflows pass both clients or documented recovery-only boundary |
+| [ ] | UX-011 | P0 | UX-002,CORE-008 | Implement central device connection-state manager | All workspaces share lifecycle; detach preserves snapshot, cancels I/O, disables live actions, and reliably rebinds the same unit |
 
 ## Evidence graph and definitions
 
@@ -89,6 +94,9 @@ the product contract before broad vendor, simulation, or hosted work.
 | [ ] | DEF-006 | P1 | DEF-001 | Add signed custom definition bundles | User definitions validate, version, import/export, and remain declared |
 | [ ] | DEF-007 | P2 | DEF-001 | Implement cached vendor/catalog/document clients | Rate limits, citations, expiry, API-key errors, and offline behavior pass |
 | [ ] | DEF-008 | P1 | DEF-002,DEF-003 | Add conservative definition matcher | Weak matches remain candidates; exact matches create expected claims only |
+| [ ] | CAT-001 | P1 | EVD-001,DEF-001 | Define normalized device, module, silicon, and accelerator catalog schema | Many devices reference canonical silicon without duplicated or conflated claims |
+| [ ] | CAT-002 | P1 | CAT-001,GOV-003 | Seed practical edge-AI device and silicon catalog | Sipeed, Milk-V, Luckfox, Rockchip boards, D-Robotics, Pi/Hailo, Jetson, Coral, and listed families import with citations and licenses |
+| [ ] | CAT-003 | P1 | CAT-002,DEF-008 | Match inspected hardware through device-to-silicon hierarchy | Board, carrier, module, SoC, CPU, accelerator, media, I/O, and runtime remain distinct evidence layers |
 
 ## Adapter SDK and vendor coverage
 
@@ -119,6 +127,7 @@ the product contract before broad vendor, simulation, or hosted work.
 | [ ] | PIN-002 | P0 | PIN-001 | Build pins and buses UI | Physical and logical views are searchable, responsive, and evidence-labeled |
 | [ ] | PIN-003 | P1 | PIN-001 | Add bus/attachment graph for common buses | Controllers and attachments model addresses/chip selects and evidence |
 | [ ] | PIN-004 | P1 | PIN-003 | Add stable multi-sample I2C inventory and signatures | Noise is retained; addresses and exact parts are not conflated |
+| [ ] | PIN-005 | P1 | PIN-001 | Complete common pin/interface knowledge base and contextual help | Canonical aliases, categories, cautions, sources, unknown import, and board-specific overrides pass contract and UI tests |
 | [ ] | TST-001 | P0 | SDK-001,EVD-001 | Define test-pack schema and runner | Prerequisite/stimulus/measurement/criteria/cleanup/timeout contract passes |
 | [ ] | TST-002 | P0 | TST-001,CORE-004 | Generate tests from capabilities and components | UI contains no board-name-specific test branching |
 | [ ] | TST-003 | P1 | TST-001 | Add common motion/environment/light/proximity/audio packs | Supported fixture results include live values and tolerances |
@@ -166,6 +175,8 @@ the product contract before broad vendor, simulation, or hosted work.
 | [ ] | FW-006 | P1 | FW-005 | Add SD imaging and supported boot/recovery workflows | Device/media identity, image hash, capacity, verify, and recovery pass |
 | [ ] | FW-007 | P0 | FW-005 | Publish and test recovery playbook per write-enabled adapter | Golden fixture recovers from deliberate interruption |
 | [ ] | FW-008 | P1 | FW-001 | Add artifact/workspace provenance and source revision | Receipt reconstructs inputs, tools, output, target, and approval |
+| [ ] | FW-009 | P0 | SDK-001,FW-001 | Implement firmware access assessment | Source, binary, read/write, protection, bootloader, debug, recovery, and optimization modes are evidence-backed |
+| [ ] | FW-010 | P2 | FW-002,FINT-006 | Add bounded binary/hex inspection and reviewed patch workflow | Edits are architecture-aware, diffed, validated, reversible, and never presented as recovered source |
 
 ## Firmware intelligence
 
@@ -195,6 +206,8 @@ the product contract before broad vendor, simulation, or hosted work.
 | [ ] | STU-003 | P1 | STU-001 | Implement electrical/logical constraint engine | Voltage, contention, address, reserved pin, current, and ground rules pass |
 | [ ] | STU-004 | P2 | STU-001,GOV-003 | Build sanitized Fritzing part/SVG importer | Connectors/geometry/license/source validate; malicious SVG tests pass |
 | [ ] | STU-005 | P2 | STU-002,STU-003 | Add compatible-pin and part suggestions | Suggestions explain constraints and never auto-wire without user action |
+| [ ] | STU-006 | P1 | STU-001,UX-011 | Preserve physical, simulated, hybrid, disconnected, and user-defined state sources | Every node/value/edge shows provenance and disconnect retains topology without enabling live actions |
+| [ ] | STU-007 | P2 | STU-004,GOV-003 | Build searchable component library and source adapters | Built-in and licensed Wokwi/Fritzing/manufacturer parts normalize without executable or SVG escape |
 | [ ] | SIM-001 | P1 | STU-001 | Define simulator adapter and result schema | Coverage, conversion diagnostics, stimuli, traces, determinism pass |
 | [ ] | SIM-002 | P2 | SIM-001 | Integrate CircuitJS for supported subsets | Unsupported graph items are reported before run |
 | [ ] | SIM-003 | P2 | SIM-001 | Integrate ngspice netlist/model execution | Model/convergence/output errors are actionable and reproducible |

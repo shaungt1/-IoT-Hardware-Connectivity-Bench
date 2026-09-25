@@ -1,4 +1,4 @@
-from app.protocol import PACKET_JPEG, PACKET_TELEMETRY, PacketParser, encode_packet
+from app.protocol import MAGIC, PACKET_JPEG, PACKET_TELEMETRY, PacketParser, encode_packet
 
 
 def test_parser_handles_fragmented_packets_and_noise() -> None:
@@ -13,3 +13,14 @@ def test_parser_handles_fragmented_packets_and_noise() -> None:
     assert packets[0].sequence == 7
     assert packets[1].payload.startswith(b"\xff\xd8")
 
+
+def test_encoder_uses_neutral_magic_and_parser_accepts_legacy_firmware() -> None:
+    encoded = encode_packet(PACKET_TELEMETRY, 9, b"{}")
+    assert encoded.startswith(MAGIC)
+    assert MAGIC == b"IOTB"
+
+    legacy = b"LMNI" + bytes((PACKET_TELEMETRY,)) + (2).to_bytes(4, "little") + (10).to_bytes(4, "little") + b"{}"
+    packets = PacketParser().feed(legacy)
+
+    assert len(packets) == 1
+    assert packets[0].sequence == 10

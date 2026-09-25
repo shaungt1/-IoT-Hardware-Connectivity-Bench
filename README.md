@@ -21,6 +21,7 @@ The adapter pauses and soft-reloads the existing program but never writes the bo
 - Installed versus planned tool capabilities with explicit safety levels
 - Windows USB serial/JTAG detection and framed telemetry
 - ESP32-S3 camera initialization and live JPEG delivery
+- Exact authenticated Seeed XIAO ESP32-S3 Sense identity and 14-pad header mapping
 - BLE advertising, service UUID visibility, and host-measured RSSI
 - Wi-Fi access-point operation, optional router connection, IP address, and RSSI
 - Browser delivery through a FastAPI hardware bridge
@@ -30,6 +31,10 @@ The adapter pauses and soft-reloads the existing program but never writes the bo
 - A buildable, opt-in Nano 33 BLE Sense diagnostic sketch with individual sensor commands
 - A CircuitPython adapter that inventories `CIRCUITPY`, source imports, libraries, runtime pins,
   heap/CPU telemetry, and stable I2C responses without replacing the installed program
+- A machine-readable `/api/contract` with versioned evidence, prototype, and test-pack schemas,
+  compatibility policy, and explicit local-control/MCP/hosted-release boundaries
+- The complete installed `@wokwi/elements` visual set: 50 package parts plus the exact XIAO Sense
+  visual, with package terminal parity and unresolved electrical semantics kept visibly unknown
 
 The camera travels over USB to the local dashboard so it works on this workstation without a Wi-Fi
 adapter. The firmware also exposes a direct Wi-Fi camera API:
@@ -40,9 +45,10 @@ adapter. The firmware also exposes a direct Wi-Fi camera API:
 | `http://192.168.91.1/capture.jpg` | Single JPEG frame |
 | `http://192.168.91.1/stream` | MJPEG stream |
 
-The board advertises a direct Wi-Fi network named `LUMNI-IOT-<chip suffix>` with initial password
-`lumni-camera`. There is no username or user account. The dashboard can change the shared BLE/Wi-Fi
-name without changing the password, or replace the direct Wi-Fi password with an 8-63 character value.
+The board can advertise a direct Wi-Fi network named `XIAO-ESP32S3-SENSE-<chip suffix>`. A fresh firmware
+install keeps that access point off until an 8-63 character password is configured over the local USB
+control link. There is no fixed credential in source control and no username or user account. The dashboard can change the shared BLE/Wi-Fi
+name without changing an existing password, or replace the direct Wi-Fi password.
 The dashboard can securely send router credentials over the local USB link; credentials are stored in
 the ESP32's preferences and are never written to the repository or API logs.
 
@@ -50,7 +56,7 @@ The XIAO ESP32-S3 supports 2.4 GHz Wi-Fi only. It cannot discover or join 5 GHz 
 external U.FL antenna is shared by Wi-Fi and BLE and must be attached for reliable RF testing.
 
 For phone-side BLE validation, use a BLE scanner such as nRF Connect for Mobile and scan for
-`LUMNI-IOT-<chip suffix>`. Connect to the advertised GATT service and read the status
+`XIAO-ESP32S3-SENSE-<chip suffix>`. Connect to the advertised GATT service and read the status
 characteristic. A phone's general Bluetooth settings may omit custom BLE peripherals even while
 they are advertising correctly.
 
@@ -80,14 +86,28 @@ backlog, and recurring QA gates are indexed in [`docs/README.md`](docs/README.md
 .\start.ps1 firmware-build
 .\start.ps1 firmware-flash -Port COM6
 .\start.ps1 sensor-firmware-build # Build only; never uploads automatically
-.\start.ps1 dashboard
-.\start.ps1 dashboard -Port COM6 # Optional preferred serial port
-.\start.ps1 dashboard-react
+.\start.ps1 react
+.\start.ps1 react -Port COM6 # Optional preferred serial port
+.\start.ps1 html             # Legacy standalone client
+.\start.ps1 both             # React plus legacy standalone client
+.\start.ps1 status
+.\start.ps1 stop
 ```
 
-Open `http://127.0.0.1:8765` for the HTML validation client. Run `dashboard-react` in another
-terminal and open `http://127.0.0.1:5173` for the React client. The React dev server proxies the API
-and WebSocket to port `8765`.
+Git Bash exposes the same modes. Running `./start.sh` without an option opens an interactive menu and
+does not start anything until `1`, `2`, or `3` is selected:
+
+```bash
+./start.sh 1       # React plus API/WebSocket
+./start.sh 2       # Legacy HTML plus API/WebSocket
+./start.sh 3       # Both clients with one API/WebSocket backend
+./start.sh status
+./start.sh stop
+```
+
+Open `http://127.0.0.1:5173` for the React client. Port `8765` is API-only by default; the legacy
+HTML source remains in `web/` but is not served. The React dev server proxies the API and WebSockets
+to port `8765`.
 
 ## Evidence and safety model
 
@@ -99,7 +119,7 @@ or an explicitly approved diagnostic firmware upload.
 The Nano diagnostic image is built with:
 
 ```powershell
-.\.venv\Scripts\platformio.exe run -d .\firmware\nano33ble-sense-diagnostics
+.\.tool-venv\Scripts\platformio.exe run -d .\firmware\nano33ble-sense-diagnostics
 ```
 
 It emits `BENCH_READY` before the host will send a named `TEST <sensor>` command. Building does not
@@ -108,7 +128,7 @@ modify the board. Uploading replaces the existing sketch and is intentionally no
 The explicit upload command is:
 
 ```powershell
-.\.venv\Scripts\platformio.exe run -d .\firmware\nano33ble-sense-diagnostics --target upload --upload-port COM10
+.\.tool-venv\Scripts\platformio.exe run -d .\firmware\nano33ble-sense-diagnostics --target upload --upload-port COM10
 ```
 
 Once installed, the bench verifies the serial handshake and enables live tests for each onboard
@@ -133,7 +153,7 @@ and brute-force operations remain disabled until a target adapter defines a safe
 USB messages use a 13-byte little-endian header followed by the payload:
 
 ```text
-LMNI | type:u8 | length:u32 | sequence:u32 | payload
+IOTB | type:u8 | length:u32 | sequence:u32 | payload
 ```
 
 Packet type `1` is UTF-8 JSON telemetry and type `2` is a JPEG frame. Host commands are newline
@@ -154,12 +174,16 @@ Factory recovery images and other private hardware material remain outside the t
 
 ## Firmware workspace and operation safety
 
-Both browser clients include a target-aware **Firmware & files** step. It can read and edit UTF-8
+The React client includes a target-aware **Firmware & files** step. It can read and edit UTF-8
 source/configuration files only inside the repository's `firmware/` folder or an explicitly detected
 mounted device filesystem. Updates use content hashes to reject stale edits. PlatformIO builds run
 locally; uploads, target resets, flash backups, and file writes require a short-lived approval bound
 to the selected device. Every planned, approved, completed, or failed operation is stored as an audit
 receipt. No flash operation runs during setup, test, discovery, or the `all` command.
+
+Local builds expose bounded real process output through the live status WebSocket and can be cancelled
+from the running operation button. Cancellation terminates the child process and records a `cancelled`
+receipt instead of presenting a generic failure.
 
 The repository contains optimized ESP32-S3 camera firmware source, but the historical workspace did
 not retain a flash receipt proving when or whether that exact revision was uploaded. The new audit

@@ -9,10 +9,34 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .pin_knowledge import annotate_pins
+
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCAL_ARDUINO_CLI = ROOT / ".tools" / "arduino-cli" / "arduino-cli.exe"
 _arduino_cache: tuple[float, dict[str, dict]] = (0.0, {})
+
+
+def apply_runtime_identity(inventory: list[dict[str, Any]], snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Promote authenticated bench telemetry over a generic host USB descriptor."""
+
+    result = deepcopy(inventory)
+    telemetry = snapshot.get("telemetry") or {}
+    port = str(snapshot.get("port") or "").upper()
+    board_model = str(telemetry.get("board_model") or "").strip()
+    if not snapshot.get("connected") or not port or not board_model:
+        return result
+    for item in result:
+        if item.get("kind") != "serial" or str(item.get("device") or "").upper() != port:
+            continue
+        item["name"] = board_model
+        item["runtime_name"] = telemetry.get("device")
+        item["board_id"] = telemetry.get("board_id")
+        item["classification"] = "microcontroller_board"
+        item["device_category"] = "Circuit, controller, or compute target"
+        item["confidence"] = max(float(item.get("confidence") or 0), 0.99)
+        item["runtime_identity_verified"] = True
+    return result
 
 
 def _component(
@@ -191,6 +215,84 @@ BOARD_CATALOG: dict[str, dict[str, Any]] = {
 }
 
 
+XIAO_ESP32S3_SENSE_PINS = [
+    {"name": "D0", "aliases": ["A0", "GPIO1"], "group": "left", "functions": ["GPIO", "ADC1_CH0", "Touch1"], "status": "verified", "source": "Seeed Studio XIAO ESP32-S3 Sense pin map"},
+    {"name": "D1", "aliases": ["A1", "GPIO2"], "group": "left", "functions": ["GPIO", "ADC1_CH1", "Touch2"], "status": "verified", "source": "Seeed Studio XIAO ESP32-S3 Sense pin map"},
+    {"name": "D2", "aliases": ["A2", "GPIO3"], "group": "left", "functions": ["GPIO", "ADC1_CH2", "Touch3"], "status": "verified", "source": "Seeed Studio XIAO ESP32-S3 Sense pin map"},
+    {"name": "D3", "aliases": ["A3", "GPIO4"], "group": "left", "functions": ["GPIO", "ADC1_CH3", "Touch4"], "status": "verified", "source": "Seeed Studio XIAO ESP32-S3 Sense pin map"},
+    {"name": "D4", "aliases": ["A4", "SDA", "GPIO5"], "group": "left", "functions": ["GPIO", "I2C SDA", "ADC1_CH4", "Touch5"], "status": "verified", "source": "Seeed Studio XIAO ESP32-S3 Sense pin map"},
+    {"name": "D5", "aliases": ["A5", "SCL", "GPIO6"], "group": "left", "functions": ["GPIO", "I2C SCL", "ADC1_CH5", "Touch6"], "status": "verified", "source": "Seeed Studio XIAO ESP32-S3 Sense pin map"},
+    {"name": "D6", "aliases": ["TX", "GPIO43"], "group": "left", "functions": ["GPIO", "UART TX"], "status": "verified", "source": "Seeed Studio XIAO ESP32-S3 Sense pin map"},
+    {"name": "D7", "aliases": ["RX", "GPIO44"], "group": "right", "functions": ["GPIO", "UART RX"], "status": "verified", "source": "Seeed Studio XIAO ESP32-S3 Sense pin map"},
+    {"name": "D8", "aliases": ["A8", "SCK", "GPIO7"], "group": "right", "functions": ["GPIO", "SPI SCK", "ADC1_CH6", "Touch7"], "status": "verified", "source": "Seeed Studio XIAO ESP32-S3 Sense pin map"},
+    {"name": "D9", "aliases": ["A9", "MISO", "GPIO8"], "group": "right", "functions": ["GPIO", "SPI MISO", "ADC1_CH7", "Touch8"], "status": "verified", "source": "Seeed Studio XIAO ESP32-S3 Sense pin map"},
+    {"name": "D10", "aliases": ["A10", "MOSI", "GPIO9"], "group": "right", "functions": ["GPIO", "SPI MOSI", "ADC1_CH8", "Touch9"], "status": "verified", "source": "Seeed Studio XIAO ESP32-S3 Sense pin map"},
+    {"name": "3V3", "aliases": ["3.3V"], "group": "right", "functions": ["3.3 V power output"], "status": "verified", "source": "Seeed Studio XIAO ESP32-S3 Sense pin map"},
+    {"name": "GND", "aliases": ["Ground"], "group": "right", "functions": ["Ground"], "status": "verified", "source": "Seeed Studio XIAO ESP32-S3 Sense pin map"},
+    {"name": "5V", "aliases": ["VBUS"], "group": "right", "functions": ["5 V USB power input/output"], "status": "verified", "source": "Seeed Studio XIAO ESP32-S3 Sense pin map"},
+]
+
+for _pin in XIAO_ESP32S3_SENSE_PINS:
+    if _pin["name"].startswith("D"):
+        _pin["electrical"] = {
+            "logic_voltage_v": 3.3,
+            "absolute_input_max_v": 3.6,
+            "five_volt_tolerant": False,
+            "characterized_source_ma": 40,
+            "characterized_sink_ma": 28,
+            "caution": "3.3 V GPIO; 5 V logic is not tolerated. High-current loads require an external driver.",
+            "source": "Espressif ESP32-S3 Series Datasheet v2.2, DC and absolute maximum characteristics",
+        }
+    elif _pin["name"] == "3V3":
+        _pin["electrical"] = {"nominal_voltage_v": 3.3, "rail": "regulated", "caution": "Available current depends on board input, regulator load, radio, camera, and peripherals.", "source": "Seeed Studio XIAO ESP32-S3 board definition"}
+    elif _pin["name"] == "5V":
+        _pin["electrical"] = {"nominal_voltage_v": 5.0, "rail": "USB VBUS", "caution": "Power rail only; never connect directly to a 3.3 V GPIO or ADC input.", "source": "Seeed Studio XIAO ESP32-S3 board definition"}
+    else:
+        _pin["electrical"] = {"nominal_voltage_v": 0.0, "rail": "ground", "source": "Seeed Studio XIAO ESP32-S3 board definition"}
+
+
+def _apply_authenticated_board_identity(
+    telemetry: dict[str, Any],
+    capabilities: list[dict],
+    components: list[dict],
+    evidence: list[dict],
+) -> dict[str, Any] | None:
+    if telemetry.get("board_id") != "seeed_xiao_esp32s3_sense":
+        return None
+    source = "Authenticated compatible firmware telemetry"
+    for capability in (
+        {"id": "gpio", "name": "11 external GPIO pins", "status": "verified", "source": source},
+        {"id": "i2c", "name": "I2C", "status": "verified", "source": source},
+        {"id": "spi", "name": "SPI and microSD", "status": "verified", "source": source},
+        {"id": "uart", "name": "UART", "status": "verified", "source": source},
+        {"id": "pdm", "name": "PDM microphone", "status": "verified", "source": source},
+    ):
+        _upsert_by_id(capabilities, capability)
+    for component in (
+        _component("esp32s3r8", "Espressif ESP32-S3R8", "microcontroller", "verified", source),
+        _component("sense_camera", "OV2640 / OV3660 camera module", "camera", "verified" if telemetry.get("camera_ready") else "unavailable", source, bus="DVP/SCCB"),
+        _component("sense_microphone", "PDM digital microphone", "sensor", "expected", "Seeed Studio Sense expansion-board definition", bus="PDM GPIO41/GPIO42"),
+        _component("sense_microsd", "microSD card slot", "storage", "expected", "Seeed Studio Sense expansion-board definition", bus="SPI GPIO7/GPIO8/GPIO9/GPIO21"),
+        _component("flash_8mb", "8 MB SPI flash", "storage", "expected", "Seeed Studio board specification", bus="SPI"),
+        _component("psram_8mb", "8 MB PSRAM", "memory", "verified" if telemetry.get("psram_bytes") else "expected", source),
+        _component("wifi_ble_radio", "2.4 GHz Wi-Fi and BLE radio", "radio", "verified", source),
+    ):
+        _upsert_by_id(components, component)
+    evidence.append({"source": source, "claim": "Exact board Seeed Studio XIAO ESP32-S3 Sense", "status": "verified"})
+    evidence.append({"source": source, "claim": "Pin map seeed-xiao-esp32s3-sense-v1", "status": "verified"})
+    return {
+        "model": telemetry.get("board_model") or "Seeed Studio XIAO ESP32-S3 Sense",
+        "family": "Seeed Studio XIAO ESP32-S3 family",
+        "manufacturer": "Seeed Studio / Espressif",
+        "classification": "microcontroller_board",
+        "mcu": telemetry.get("mcu") or "Espressif ESP32-S3R8",
+        "architecture": telemetry.get("architecture") or "Xtensa LX7 dual-core",
+        "confidence": 0.99,
+        "candidates": ["Seeed Studio XIAO ESP32-S3 Sense"],
+        "pins": deepcopy(XIAO_ESP32S3_SENSE_PINS),
+    }
+
+
 def arduino_cli_path() -> str | None:
     configured = os.getenv("ARDUINO_CLI_PATH")
     if configured and Path(configured).is_file():
@@ -203,7 +305,7 @@ def arduino_cli_path() -> str | None:
 def arduino_board_inventory(force: bool = False) -> dict[str, dict]:
     global _arduino_cache
     now = time.monotonic()
-    if not force and now - _arduino_cache[0] < 5:
+    if not force and now - _arduino_cache[0] < 60:
         return deepcopy(_arduino_cache[1])
     executable = arduino_cli_path()
     if not executable:
@@ -279,6 +381,63 @@ def enrich_hardware_list(hardware: list[dict[str, Any]]) -> list[dict[str, Any]]
     return enriched
 
 
+def _upsert_by_id(items: list[dict[str, Any]], claim: dict[str, Any]) -> None:
+    existing = next((item for item in items if item.get("id") == claim["id"]), None)
+    if existing is None:
+        items.append(claim)
+        return
+    if claim.get("status") == "verified":
+        existing.update(claim)
+
+
+def _merge_compatible_runtime_claims(
+    capabilities: list[dict[str, Any]],
+    components: list[dict[str, Any]],
+    evidence: list[dict[str, Any]],
+    telemetry: dict[str, Any],
+) -> None:
+    source = "Compatible device telemetry"
+    device_name = telemetry.get("device")
+    if device_name:
+        evidence.append({"source": source, "claim": f"Device runtime {device_name}", "status": "verified"})
+
+    if "camera_ready" in telemetry:
+        ready = telemetry.get("camera_ready") is True
+        camera_status = "verified" if ready else "unavailable"
+        camera_pid = telemetry.get("camera_sensor_pid")
+        camera_name = "Camera sensor"
+        if isinstance(camera_pid, int):
+            camera_name += f" (PID 0x{camera_pid:02X})"
+        _upsert_by_id(
+            capabilities,
+            {"id": "camera", "name": "Camera capture", "status": camera_status, "source": source},
+        )
+        _upsert_by_id(
+            components,
+            _component("runtime_camera", camera_name, "camera", camera_status, telemetry.get("camera_status") or source),
+        )
+
+    if any(key in telemetry for key in ("ble_advertising", "ble_device_address", "ble_connected_clients")):
+        _upsert_by_id(
+            capabilities,
+            {"id": "ble", "name": "Bluetooth Low Energy", "status": "verified", "source": source},
+        )
+        _upsert_by_id(
+            components,
+            _component("runtime_ble_radio", "Bluetooth Low Energy radio", "radio", "verified", source),
+        )
+
+    if any(key in telemetry for key in ("wifi_ap_active", "wifi_station_connected", "wifi_station_status")):
+        _upsert_by_id(
+            capabilities,
+            {"id": "wifi_24", "name": "2.4 GHz Wi-Fi", "status": "verified", "source": source},
+        )
+        _upsert_by_id(
+            components,
+            _component("runtime_wifi_radio", "2.4 GHz Wi-Fi radio", "radio", "verified", source),
+        )
+
+
 def inspect_hardware(profile: dict[str, Any], live: dict[str, Any] | None = None, assigned_model: str | None = None) -> dict:
     identity = f"{profile.get('vid')}:{profile.get('pid')}" if profile.get("vid") and profile.get("pid") else ""
     catalog = _catalog_record(identity)
@@ -349,6 +508,7 @@ def inspect_hardware(profile: dict[str, Any], live: dict[str, Any] | None = None
         mcu = architecture = runtime = None
 
     services: list[dict] = []
+    runtime_pins = list((live or {}).get("pins", []))
     if live:
         live_identity = live.get("identity")
         if live_identity:
@@ -377,6 +537,18 @@ def inspect_hardware(profile: dict[str, Any], live: dict[str, Any] | None = None
         if telemetry.get("firmware"):
             runtime = telemetry["firmware"]
             evidence.append({"source": "authenticated device inspection", "claim": f"Runtime {runtime}", "status": "verified"})
+        _merge_compatible_runtime_claims(capabilities, components, evidence, telemetry)
+        authenticated_identity = _apply_authenticated_board_identity(telemetry, capabilities, components, evidence)
+        if authenticated_identity:
+            model = authenticated_identity["model"]
+            family = authenticated_identity["family"]
+            manufacturer = authenticated_identity["manufacturer"]
+            classification = authenticated_identity["classification"]
+            mcu = authenticated_identity["mcu"]
+            architecture = authenticated_identity["architecture"]
+            confidence = authenticated_identity["confidence"]
+            candidates = authenticated_identity["candidates"]
+            runtime_pins = authenticated_identity["pins"]
         live_services = live.get("services", {})
         if live_services.get("ssh"):
             services.append({"name": "SSH", "address": profile.get("ip_address"), "port": 22, "status": "verified"})
@@ -433,6 +605,13 @@ def inspect_hardware(profile: dict[str, Any], live: dict[str, Any] | None = None
     if profile.get("kind") == "serial" and not (live or {}).get("adapter"):
         diagnostic_ready = bool((live or {}).get("diagnostic", {}).get("ready"))
         tests.append({"id": "serial_protocol", "name": "Verify serial diagnostic protocol", "risk": "read-only", "available": diagnostic_ready, "description": "Rechecks the identified diagnostic handshake without sending arbitrary bytes." if diagnostic_ready else "Requires a compatible runtime or diagnostic firmware; the bench will not send arbitrary bytes."})
+    telemetry = (live or {}).get("telemetry", {})
+    if "camera_ready" in telemetry:
+        tests.append({"id": "camera_stream", "name": "Verify camera stream", "risk": "read-only", "available": telemetry.get("camera_ready") is True, "description": "Confirms that the selected device reports a ready camera and that the bench is receiving image frames."})
+    if any(key in telemetry for key in ("ble_advertising", "ble_device_address", "ble_connected_clients")):
+        tests.append({"id": "ble_runtime", "name": "Verify Bluetooth runtime", "risk": "read-only", "available": True, "description": "Confirms that the selected device is reporting Bluetooth Low Energy runtime state."})
+    if any(key in telemetry for key in ("wifi_ap_active", "wifi_station_connected", "wifi_station_status")):
+        tests.append({"id": "wifi_runtime", "name": "Verify Wi-Fi runtime", "risk": "read-only", "available": True, "description": "Confirms that the selected device is reporting Wi-Fi access-point and station state."})
     for component in components:
         if component.get("type") == "sensor":
             diagnostic_ready = bool((live or {}).get("diagnostic", {}).get("ready"))
@@ -500,7 +679,7 @@ def inspect_hardware(profile: dict[str, Any], live: dict[str, Any] | None = None
         "components": components,
         "services": services,
         "connection_interfaces": connection_interfaces,
-        "pins": list((live or {}).get("pins", [])),
+        "pins": annotate_pins(runtime_pins),
         "attached_peripherals": list((live or {}).get("attached_peripherals", [])),
         "identity_layers": list((live or {}).get("identity_layers", [])),
         "adapter": (live or {}).get("adapter"),

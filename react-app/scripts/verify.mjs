@@ -91,6 +91,50 @@ async function verifyReactClient() {
   console.log("React: host, Feather identity, pins, tests, firmware, and tools passed");
 }
 
+async function verifyPrototype() {
+  console.log("Prototype: loading a connected circuit target");
+  await page.goto("http://127.0.0.1:5173", { waitUntil: "networkidle" });
+  await page.getByText(/selectable interfaces found/i).waitFor();
+  const targetRow = page.locator("tbody tr").filter({ hasText: "Espressif ESP32 USB JTAG/serial family" }).first();
+  await targetRow.waitFor();
+  await targetRow.click();
+  await page.getByRole("button", { name: /inspect iot device/i }).click();
+  await page.getByRole("heading", { name: /device identity and capabilities/i }).waitFor();
+  await page.locator(".workflow button", { hasText: "Prototype" }).click();
+  await page.getByRole("heading", { name: /prototype/i }).waitFor();
+  await page.locator(".prototype-canvas .react-flow").waitFor();
+  if (!(await page.getByText("Virtual analog sensor", { exact: true }).count())) {
+    await page.getByRole("button", { name: /analog sensor/i }).click();
+    await page.locator(".prototype-inspector", { hasText: "Virtual analog sensor" }).waitFor();
+  }
+  if (!(await page.getByText("Virtual LED", { exact: true }).count())) {
+    await page.getByRole("button", { name: /^led/i }).click();
+    await page.locator(".prototype-inspector", { hasText: "Virtual LED" }).waitFor();
+  }
+  await page.getByRole("button", { name: /save prototype/i }).click();
+  const savedStatus = page.getByText(/Saved \d+ component/i);
+  await savedStatus.waitFor();
+  const savedText = await savedStatus.innerText();
+  const beforeReload = Number(savedText.match(/Saved (\d+) component/i)?.[1] || 0);
+  if (beforeReload < 3) throw new Error(`Prototype did not add virtual parts: ${beforeReload} nodes`);
+  await page.waitForTimeout(350);
+  await page.screenshot({ path: fileURLToPath(new URL("react-prototype.png", output)), fullPage: true });
+
+  await page.locator(".workflow button", { hasText: "Host & devices" }).click();
+  await page.locator(".workflow button", { hasText: "Prototype" }).click();
+  const loadedStatus = page.getByText(/\d+ component\(s\), \d+ connection/i);
+  await loadedStatus.waitFor();
+  const loadedText = await loadedStatus.innerText();
+  const afterReload = Number(loadedText.match(/(\d+) component/i)?.[1] || 0);
+  if (afterReload !== beforeReload) throw new Error(`Prototype persistence mismatch: ${beforeReload} before, ${afterReload} after`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(250);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+  if (overflow) throw new Error("Prototype has page-level horizontal overflow at mobile width");
+  await page.screenshot({ path: fileURLToPath(new URL("react-prototype-mobile.png", output)) });
+  console.log(`Prototype: ${afterReload} graph nodes saved and reopened`);
+}
+
 async function verifyMobileLayouts() {
   console.log("Mobile: checking both clients at 390x844");
   await page.setViewportSize({ width: 390, height: 844 });
@@ -110,6 +154,7 @@ try {
   const target = process.argv[2] || "all";
   if (target === "all" || target === "html") await verifyHtmlClient();
   if (target === "all" || target === "react") await verifyReactClient();
+  if (target === "all" || target === "prototype") await verifyPrototype();
   if (target === "all" || target === "mobile") await verifyMobileLayouts();
   if (errors.length) throw new Error(`Browser errors: ${errors.join(" | ")}`);
   console.log(`VERIFY_OK: ${target} client verification completed without browser errors.`);

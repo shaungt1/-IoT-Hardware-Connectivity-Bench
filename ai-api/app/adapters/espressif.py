@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import importlib.util
 import re
 import subprocess
-import sys
 import threading
 import time
 from typing import Any
+
+from .base import AdapterManifest
+from ..tool_paths import tool_executable
 
 
 SERIAL_BRIDGE_USB_IDS = {
@@ -55,7 +56,7 @@ def _port_lock(port: str) -> threading.Lock:
 
 
 def _esptool_available() -> bool:
-    return importlib.util.find_spec("esptool") is not None
+    return tool_executable("esptool") is not None
 
 
 def _field(output: str, label: str) -> str | None:
@@ -84,10 +85,11 @@ def _parse_probe(output: str) -> dict[str, Any]:
 def _probe_target(port: str) -> dict[str, Any]:
     if not _esptool_available():
         raise ValueError("esptool is not installed in the bench environment")
+    executable = tool_executable("esptool")
+    if not executable:
+        raise ValueError("esptool is not installed in the bench tool environment")
     command = [
-        sys.executable,
-        "-m",
-        "esptool",
+        executable,
         "--chip",
         "auto",
         "--port",
@@ -167,6 +169,16 @@ def _esp8266_identity(profile: dict[str, Any], probe: dict[str, Any]) -> dict[st
 class EspressifRomAdapter:
     adapter_id = "espressif_rom"
     name = "Espressif ROM target probe"
+    manifest = AdapterManifest(
+        id=adapter_id,
+        name=name,
+        version="1.0",
+        transports=("USB serial", "USB-to-UART"),
+        families=("ESP8266", "ESP32", "ESP32-S2", "ESP32-S3", "ESP32-C3", "ESP32-C6"),
+        inspection_modes=("disruptive",),
+        timeout_seconds=20,
+        safety="Opt-in ROM handshake may reset the target but uses no erase, write, or flash command.",
+    )
 
     def supports(self, profile: dict[str, Any]) -> bool:
         identity = (str(profile.get("vid", "")).upper(), str(profile.get("pid", "")).upper())

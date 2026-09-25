@@ -3,7 +3,7 @@ from app.host_wifi import parse_netsh_networks
 
 def test_parse_netsh_networks_tracks_band_and_strongest_bssid() -> None:
     output = """
-SSID 1 : Beach Tribe
+SSID 1 : Test Network
     Authentication         : WPA2-Personal
     BSSID 1                : aa:bb:cc:dd:ee:ff
          Signal            : 42%
@@ -20,7 +20,7 @@ SSID 2 : Studio 5G
 
     networks = parse_netsh_networks(output)
 
-    assert networks[0]["ssid"] == "Beach Tribe"
+    assert networks[0]["ssid"] == "Test Network"
     assert networks[0]["signal_percent"] == 75
     assert networks[0]["band"] == "2.4 GHz"
     assert networks[1]["band"] == "5 GHz"

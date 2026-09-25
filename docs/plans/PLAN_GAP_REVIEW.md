@@ -28,6 +28,11 @@ security/packaging, and repeatable cross-platform hardware evidence.
 | Edit code, build, backup, flash, recover | Phase 7 | `FW` | Covered with write gates |
 | Firmware layers, carving, decompilation, SVD correlation | Phase 8 | `FINT` | Covered from idea intake |
 | Interactive rapid-prototyping canvas | Phase 9 | `STU` | Covered |
+| Mixed virtual and physical hardware-in-the-loop | Phases 9-10 | `STU`, `HIL`, `FIX` | Covered with explicit adapter and fixture gates |
+| Hot-plug state across every workspace | Phases 1 and 9 | `UX`, `CORE`, `STU` | Covered; OS event adapters remain work |
+| Common pin/interface explanations and aliases | Phases 2 and 4 | `PIN`, `DEF` | Covered; initial knowledge foundation implemented |
+| Edge-AI board, module, SoC, and accelerator catalog | Phases 2-3 | `CAT`, `DEF`, `ADP` | Covered; catalog data remains expected until verified |
+| Firmware/source/binary access assessment | Phases 7-8 | `FW`, `FINT` | Covered without claiming source recovery |
 | Circuit/electrical/firmware simulation | Phase 10 | `SIM`, `HIL` | Covered as engine adapters |
 | KiCad/Fritzing interoperability | Phases 9 and 11 | `STU`, `EDA` | Covered with licensing/fidelity gates |
 | Photos/OCR/AI identification | Phase 11 | `VIS`, `AI` | Covered; inferred until confirmed |
@@ -68,6 +73,9 @@ security/packaging, and repeatable cross-platform hardware evidence.
 - Added explicit real, simulated, and hybrid truth modes.
 - Added Fritzing asset ingestion without treating artwork as hardware evidence.
 - Added a bundled MCP lifecycle task and read-only/loopback default.
+- Added a structured hybrid prototype graph, live/simulated provenance, and bidirectional HIL gates.
+- Added stable disconnected-workspace behavior and a common pin/interface knowledge service.
+- Separated edge-AI devices/modules from canonical silicon and accelerator records.
 - Kept observability separate from device messaging and measurement records.
 - Kept React as the product UI and HTML as validation/recovery until parity.
 
@@ -100,12 +108,18 @@ one-off code and repeat the exact scalability problem the product is intended to
 
 ## Ideas-folder audit
 
-Files present and reviewed on 2026-09-24:
+Files incorporated on 2026-09-24:
 
 - `docs/ideas/new_resources.md` -> `RESOURCE_INTAKE.md`
 - `docs/ideas/firmware_intellgence_layer.md` -> `FIRMWARE_INTELLIGENCE_INTAKE.md`
-- `docs/ideas/async_state_ui_connection.md` -> present but empty at final audit; intake remains pending
-  until content is added.
+- `docs/ideas/async_state_ui_issues/async_state_ui_connection.md`
+- `docs/ideas/document_pin_modes_and_interfaces.md`
+- `docs/ideas/low_level_source_code_editing.md`
+- `docs/ideas/npu_device_chip_list_2026.md`
+- `docs/ideas/rapid_iot_prototype_tool.md`
+
+Those five records are dispositioned in `IDEA_INTAKE_2026-09-24.md` and the task backlog. The separate
+`docs/ideas/agentic_ai_integration.md` workstream was intentionally not reviewed or changed.
 
 Future idea files should receive an intake record before their content changes the master plan or
 default dependency set.

@@ -47,6 +47,8 @@ observability, catalog mirrors, databases, and hosted collaboration services may
 | Firmware | Workspaces, builds, artifacts, backup, flash, verify, restore | Target identification |
 | Firmware intelligence | Authorized acquisition, carving, software graph, binary/register analysis | Treating analysis as physical verification |
 | Circuit graph | Boards, parts, pins, buses, nets, evidence, constraints | Analog solver internals |
+| Device lifecycle | Stable unit identity, attach/remove/rebind, handles, cancellation, cached state | Board-model inference |
+| Hardware control | Capability-negotiated GPIO/ADC/PWM/bus actions through adapters | Blind stimulus or universal pin access |
 | Providers | Vendor/component/document lookup and caching | Promoting claims to verified |
 | Observability | Product logs, metrics, traces, health, diagnostics | Device protocol semantics |
 
@@ -299,3 +301,24 @@ excluded by default.
 | Hosted product | Control plane, metadata, collaboration, billing | Optional paid services |
 
 The local release must remain fully useful without Docker, cloud accounts, API keys, or an AI model.
+
+## Hybrid prototype control path
+
+```text
+Prototype graph event
+        |
+constraint + capability check
+        |
+operation plan, target generation, lock, approval
+        |
+Hardware Control API
+        |
+Firmata | runtime RPC | Linux GPIO | debug/vendor adapter | fixture
+        |
+physical measurement -> evidence/event stream -> graph state
+```
+
+Simulation uses the same graph but a different adapter. Physical, simulated, and hybrid values carry
+their state source through storage, events, UI, exports, and MCP. Device removal moves the physical
+binding to `disconnected`, releases its transport, and applies the adapter's reviewed safe state; it
+does not delete or silently rebind the graph.

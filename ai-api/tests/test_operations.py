@@ -1,4 +1,8 @@
-from app.operations import OperationManager
+import sys
+import threading
+import time
+
+from app.operations import OperationManager, OperationPlan
 from app.storage import StateStore
 from app.workspace import DeviceWorkspace
 
@@ -59,3 +63,81 @@ def test_flash_requires_project_board_match(tmp_path, monkeypatch) -> None:
 
     assert next(item for item in feather if item["id"].startswith("flash:"))["available"] is False
     assert next(item for item in nano if item["id"].startswith("flash:"))["available"] is True
+
+
+def test_disconnect_invalidates_plan_and_cancels_active_process(tmp_path, monkeypatch) -> None:
+    manager = OperationManager(tmp_path, StateStore(tmp_path / "state.db"), DeviceWorkspace(tmp_path))
+    profile = {"id": "serial:COM8", "kind": "serial", "device": "COM8"}
+    plan = OperationPlan(
+        id="long-operation",
+        identifier=profile["id"],
+        operation_id="test:long",
+        label="Long operation",
+        risk="read-only",
+        description="Test operation",
+        preview="Wait for cancellation",
+        created_at=time.time(),
+        parameters={},
+        fingerprint=manager.fingerprint(profile, {}),
+    )
+    manager._plans[plan.id] = plan
+    monkeypatch.setattr(manager, "_command", lambda *_: [sys.executable, "-u", "-c", "import time; print('build started', flush=True); time.sleep(30)"])
+    result = {}
+
+    def execute():
+        result.update(manager.execute(plan.id, profile["id"], None, profile, {}))
+
+    thread = threading.Thread(target=execute)
+    thread.start()
+    deadline = time.time() + 3
+    while not manager.snapshot()["active_identifiers"] and time.time() < deadline:
+        time.sleep(0.01)
+
+    cancelled = manager.cancel_identifier(profile["id"])
+    thread.join(timeout=3)
+
+    assert cancelled["process_terminated"] is True
+    assert thread.is_alive() is False
+    assert result["status"] == "cancelled"
+    assert result["passed"] is False
+    assert profile["id"] in manager.snapshot()["disconnected_identifiers"]
+    manager.mark_present(profile["id"])
+    assert profile["id"] not in manager.snapshot()["disconnected_identifiers"]
+
+
+def test_operator_cancel_terminates_process_without_marking_target_disconnected(tmp_path, monkeypatch) -> None:
+    manager = OperationManager(tmp_path, StateStore(tmp_path / "state.db"), DeviceWorkspace(tmp_path))
+    profile = {"id": "serial:COM8", "kind": "serial", "device": "COM8"}
+    plan = OperationPlan(
+        id="operator-cancel",
+        identifier=profile["id"],
+        operation_id="test:long",
+        label="Long operation",
+        risk="read-only",
+        description="Test operation",
+        preview="Wait for operator cancellation",
+        created_at=time.time(),
+        parameters={},
+        fingerprint=manager.fingerprint(profile, {}),
+    )
+    manager._plans[plan.id] = plan
+    monkeypatch.setattr(manager, "_command", lambda *_: [sys.executable, "-c", "import time; time.sleep(30)"])
+    result = {}
+
+    thread = threading.Thread(target=lambda: result.update(manager.execute(plan.id, profile["id"], None, profile, {})))
+    thread.start()
+    deadline = time.time() + 3
+    while not manager.snapshot()["active_identifiers"] and time.time() < deadline:
+        time.sleep(0.01)
+
+    while "build started" not in manager.snapshot()["active"][0]["output"] and time.time() < deadline:
+        time.sleep(0.01)
+
+    cancelled = manager.cancel_active(profile["id"])
+    thread.join(timeout=3)
+
+    assert cancelled == {"identifier": profile["id"], "plans_cancelled": 1, "process_terminated": True}
+    assert thread.is_alive() is False
+    assert result["status"] == "cancelled"
+    assert profile["id"] not in manager.snapshot()["disconnected_identifiers"]
+    assert manager.snapshot()["active"] == []

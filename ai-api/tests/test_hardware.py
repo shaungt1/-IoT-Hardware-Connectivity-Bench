@@ -1,6 +1,8 @@
 import json
 
-from app.hardware import _device_ip, parse_usb_network_adapters
+import pytest
+
+from app.hardware import _device_ip, inspect_usb_network_device, parse_usb_network_adapters, run_usb_network_diagnostic
 
 
 def test_device_ip_uses_board_address_on_usb_subnet() -> None:
@@ -40,3 +42,22 @@ def test_usb_network_discovery_identifies_lichee_and_prefers_ncm() -> None:
     assert devices[0]["interface"] == "Ethernet 8"
     assert devices[0]["ip_address"] == "10.6.156.1"
     assert devices[0]["web_url"] == "http://10.6.156.1:18800"
+
+
+def test_usb_network_inspection_never_assumes_ssh_credentials(monkeypatch) -> None:
+    profile = {
+        "id": "usb-network:test",
+        "kind": "usb_network",
+        "ip_address": "10.6.156.1",
+        "web_url": None,
+        "is_lichee": True,
+    }
+    monkeypatch.setattr("app.hardware.discover_usb_network_devices", lambda cache_seconds=0: [profile])
+    monkeypatch.setattr("app.hardware._tcp_open", lambda host, port: True)
+
+    result = inspect_usb_network_device(profile["id"])
+
+    assert result["telemetry"]["ssh_authenticated"] is False
+    assert result["telemetry"]["enrollment_required"] is True
+    with pytest.raises(ValueError, match="verified SSH host-key"):
+        run_usb_network_diagnostic(profile["id"], "system_summary")

@@ -10,15 +10,19 @@
 
 namespace {
 
-constexpr char kFirmwareVersion[] = "iot-test-0.4.1";
+constexpr char kFirmwareVersion[] = "iot-bench-0.6.1";
+constexpr char kBoardId[] = "seeed_xiao_esp32s3_sense";
+constexpr char kBoardModel[] = "Seeed Studio XIAO ESP32-S3 Sense";
+constexpr char kMcuModel[] = "Espressif ESP32-S3R8";
+constexpr char kPinMapVersion[] = "seeed-xiao-esp32s3-sense-v1";
 constexpr char kBleServiceUuid[] = "8f7a0001-6e7d-4a44-9f9d-10a1b2c3d401";
 constexpr char kBleStatusUuid[] = "8f7a0002-6e7d-4a44-9f9d-10a1b2c3d401";
-constexpr char kDefaultApPassword[] = "lumni-camera";
+constexpr char kPreferencesNamespace[] = "iot-bench";
 constexpr uint32_t kTelemetryIntervalMs = 1000;
 constexpr uint32_t kFrameIntervalMs = 25;
 constexpr uint8_t kPacketTelemetry = 1;
 constexpr uint8_t kPacketJpeg = 2;
-constexpr uint8_t kPacketMagic[] = {'L', 'M', 'N', 'I'};
+constexpr uint8_t kPacketMagic[] = {'I', 'O', 'T', 'B'};
 
 Preferences preferences;
 NimBLECharacteristic* statusCharacteristic = nullptr;
@@ -49,6 +53,12 @@ uint32_t lastFrameAt = 0;
 uint32_t fpsWindowAt = 0;
 uint32_t fpsWindowFrames = 0;
 float measuredFps = 0.0f;
+int8_t cameraBrightness = 0;
+int8_t cameraContrast = 0;
+int8_t cameraSaturation = 0;
+int8_t cameraSharpness = 0;
+int8_t cameraAeLevel = 0;
+uint8_t cameraJpegQuality = 12;
 uint32_t bleConnectionsTotal = 0;
 uint32_t bleLastConnectionAt = 0;
 bool internetReachable = false;
@@ -59,6 +69,12 @@ uint32_t internetLastProbeAt = 0;
 uint32_t internetTestsSuccessful = 0;
 uint64_t internetBytesSent = 0;
 uint64_t internetBytesReceived = 0;
+uint32_t controlSequence = 0;
+String controlLastAction;
+String controlLastPin;
+String controlLastError;
+int32_t controlLastValue = 0;
+bool controlLastOk = false;
 
 const IPAddress kAccessPointIp(192, 168, 91, 1);
 const IPAddress kAccessPointSubnet(255, 255, 255, 0);
@@ -139,6 +155,19 @@ String makeTelemetry() {
 
   String json = "{";
   json += "\"device\":\"" + jsonEscape(deviceName) + "\",";
+  json += "\"board_id\":\"" + String(kBoardId) + "\",";
+  json += "\"board_model\":\"" + String(kBoardModel) + "\",";
+  json += "\"mcu\":\"" + String(kMcuModel) + "\",";
+  json += "\"architecture\":\"Xtensa LX7 dual-core\",";
+  json += "\"pin_map_version\":\"" + String(kPinMapVersion) + "\",";
+  json += "\"control_protocol\":\"iot-bench-control/1\",";
+  json += "\"control_capabilities\":[\"gpio_read\",\"gpio_write\",\"adc_read\"],";
+  json += "\"control_sequence\":" + String(controlSequence) + ",";
+  json += "\"control_last_action\":\"" + jsonEscape(controlLastAction) + "\",";
+  json += "\"control_last_pin\":\"" + jsonEscape(controlLastPin) + "\",";
+  json += "\"control_last_value\":" + String(controlLastValue) + ",";
+  json += "\"control_last_ok\":" + String(controlLastOk ? "true" : "false") + ",";
+  json += "\"control_last_error\":\"" + jsonEscape(controlLastError) + "\",";
   json += "\"firmware\":\"" + String(kFirmwareVersion) + "\",";
   json += "\"uptime_ms\":" + String(millis()) + ",";
   json += "\"free_heap_bytes\":" + String(ESP.getFreeHeap()) + ",";
@@ -146,6 +175,12 @@ String makeTelemetry() {
   json += "\"camera_ready\":" + String(cameraReady ? "true" : "false") + ",";
   json += "\"camera_sensor_pid\":" + String(cameraSensorPid) + ",";
   json += "\"camera_fps\":" + String(measuredFps, 1) + ",";
+  json += "\"camera_brightness\":" + String(cameraBrightness) + ",";
+  json += "\"camera_contrast\":" + String(cameraContrast) + ",";
+  json += "\"camera_saturation\":" + String(cameraSaturation) + ",";
+  json += "\"camera_sharpness\":" + String(cameraSharpness) + ",";
+  json += "\"camera_ae_level\":" + String(cameraAeLevel) + ",";
+  json += "\"camera_jpeg_quality\":" + String(cameraJpegQuality) + ",";
   json += "\"frames_sent\":" + String(frameSequence) + ",";
   json += "\"usb_streaming\":" + String(usbStreamEnabled ? "true" : "false") + ",";
   json += "\"ble_advertising\":" + String(bleAdvertising ? "true" : "false") + ",";
@@ -158,6 +193,7 @@ String makeTelemetry() {
   json += "\"ble_service_uuid\":\"" + String(kBleServiceUuid) + "\",";
   json += "\"ble_device_address\":\"" + String(NimBLEDevice::getAddress().toString().c_str()) + "\",";
   json += "\"wifi_ap_active\":" + String(wifiApActive ? "true" : "false") + ",";
+  json += "\"wifi_ap_configured\":" + String(apPassword.length() >= 8 ? "true" : "false") + ",";
   json += "\"wifi_ap_ssid\":\"" + jsonEscape(apName) + "\",";
   json += "\"wifi_ap_ip\":\"" + String(wifiApActive ? WiFi.softAPIP().toString() : "") + "\",";
   json += "\"wifi_ap_clients\":" + String(wifiApActive ? WiFi.softAPgetStationNum() : 0) + ",";
@@ -191,6 +227,64 @@ void publishTelemetry() {
     statusCharacteristic->setValue(payload.c_str());
     statusCharacteristic->notify();
   }
+}
+
+int8_t externalPin(const String& name) {
+  static constexpr int8_t pins[] = {1, 2, 3, 4, 5, 6, 43, 44, 7, 8, 9};
+  if (name.length() < 2 || name[0] != 'D') {
+    return -1;
+  }
+  const int index = name.substring(1).toInt();
+  return index >= 0 && index < 11 && name == String("D") + String(index) ? pins[index] : -1;
+}
+
+void finishControl(const String& action, const String& pin, bool ok, int32_t value, const String& error = "") {
+  controlSequence++;
+  controlLastAction = action;
+  controlLastPin = pin;
+  controlLastOk = ok;
+  controlLastValue = value;
+  controlLastError = error;
+  publishTelemetry();
+}
+
+void processControlCommand(const String& command) {
+  const int first = command.indexOf('\t');
+  const int second = command.indexOf('\t', first + 1);
+  const String action = first > 0 ? command.substring(0, first) : command;
+  const String pinName = first > 0 ? (second > first ? command.substring(first + 1, second) : command.substring(first + 1)) : "";
+  const int8_t pin = externalPin(pinName);
+  if (pin < 0) {
+    finishControl(action, pinName, false, 0, "Pin is not an exposed D0-D10 terminal");
+    return;
+  }
+  if (action == "GPIO READ") {
+    pinMode(pin, INPUT);
+    finishControl(action, pinName, true, digitalRead(pin));
+    return;
+  }
+  if (action == "ADC READ") {
+    if (pinName != "D0" && pinName != "D1" && pinName != "D2" && pinName != "D3" && pinName != "D4" && pinName != "D5") {
+      finishControl(action, pinName, false, 0, "ADC is available only on D0-D5");
+      return;
+    }
+    pinMode(pin, INPUT);
+    finishControl(action, pinName, true, analogRead(pin));
+    return;
+  }
+  if (action == "GPIO WRITE" && second > first) {
+    const String requested = command.substring(second + 1);
+    if (requested != "0" && requested != "1") {
+      finishControl(action, pinName, false, 0, "GPIO value must be 0 or 1");
+      return;
+    }
+    const int value = requested == "1" ? HIGH : LOW;
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, value);
+    finishControl(action, pinName, true, value == HIGH ? 1 : 0);
+    return;
+  }
+  finishControl(action, pinName, false, 0, "Unsupported control command");
 }
 
 bool initCamera() {
@@ -228,7 +322,7 @@ bool initCamera() {
   sensor_t* sensor = esp_camera_sensor_get();
   if (sensor != nullptr) {
     sensor->set_framesize(sensor, FRAMESIZE_VGA);
-    sensor->set_quality(sensor, 12);
+    sensor->set_quality(sensor, cameraJpegQuality);
   }
   return true;
 }
@@ -259,9 +353,9 @@ esp_err_t captureHandler(httpd_req_t* request) {
 }
 
 esp_err_t streamHandler(httpd_req_t* request) {
-  static constexpr char kBoundary[] = "\r\n--lumni-frame\r\n";
+  static constexpr char kBoundary[] = "\r\n--iot-bench-frame\r\n";
   static constexpr char kHeader[] = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
-  httpd_resp_set_type(request, "multipart/x-mixed-replace;boundary=lumni-frame");
+  httpd_resp_set_type(request, "multipart/x-mixed-replace;boundary=iot-bench-frame");
   httpd_resp_set_hdr(request, "Access-Control-Allow-Origin", "*");
 
   while (true) {
@@ -287,7 +381,9 @@ esp_err_t streamHandler(httpd_req_t* request) {
     if (result != ESP_OK) {
       return result;
     }
-    vTaskDelay(pdMS_TO_TICKS(kFrameIntervalMs));
+    frameSequence++;
+    fpsWindowFrames++;
+    taskYIELD();
   }
 }
 
@@ -308,7 +404,7 @@ void startCameraServer() {
 }
 
 void connectStoredWifi() {
-  if (!preferences.begin("lumni-iot", false)) {
+  if (!preferences.begin(kPreferencesNamespace, false)) {
     return;
   }
   const String ssid = preferences.isKey("ssid") ? preferences.getString("ssid", "") : "";
@@ -323,8 +419,8 @@ void connectStoredWifi() {
 void loadDeviceConfiguration(const String& defaultName) {
   deviceName = defaultName;
   apName = defaultName;
-  apPassword = kDefaultApPassword;
-  if (!preferences.begin("lumni-iot", false)) {
+  apPassword = "";
+  if (!preferences.begin(kPreferencesNamespace, false)) {
     return;
   }
   if (preferences.isKey("device_name")) {
@@ -332,7 +428,7 @@ void loadDeviceConfiguration(const String& defaultName) {
     apName = deviceName;
   }
   if (preferences.isKey("ap_password")) {
-    const String storedPassword = preferences.getString("ap_password", kDefaultApPassword);
+    const String storedPassword = preferences.getString("ap_password", "");
     if (storedPassword.length() >= 8) {
       apPassword = storedPassword;
     }
@@ -342,7 +438,7 @@ void loadDeviceConfiguration(const String& defaultName) {
 
 void configureWifi(const String& ssid, const String& password, bool remember) {
   if (remember) {
-    if (!preferences.begin("lumni-iot", false)) {
+    if (!preferences.begin(kPreferencesNamespace, false)) {
       return;
     }
     preferences.putString("ssid", ssid);
@@ -495,6 +591,10 @@ void setBleAdvertising(bool enabled) {
 
 void setWifiAccessPoint(bool enabled) {
   if (enabled) {
+    if (apPassword.length() < 8) {
+      wifiApActive = false;
+      return;
+    }
     const bool addressConfigured = WiFi.softAPConfig(kAccessPointIp, kAccessPointIp, kAccessPointSubnet);
     wifiApActive = addressConfigured && WiFi.softAP(apName.c_str(), apPassword.c_str());
   } else {
@@ -504,16 +604,20 @@ void setWifiAccessPoint(bool enabled) {
 }
 
 void configureDeviceAccess(const String& name, const String& password) {
-  if (!preferences.begin("lumni-iot", false)) {
+  if (!preferences.begin(kPreferencesNamespace, false)) {
     return;
   }
   preferences.putString("device_name", name);
-  preferences.putString("ap_password", password);
+  if (password.length() >= 8) {
+    preferences.putString("ap_password", password);
+  }
   preferences.end();
 
   deviceName = name;
   apName = name;
-  apPassword = password;
+  if (password.length() >= 8) {
+    apPassword = password;
+  }
 
   const bool restartAp = wifiApActive;
   if (restartAp) {
@@ -529,6 +633,38 @@ void configureDeviceAccess(const String& name, const String& password) {
   bleAdvertising = restartBle && bleAdvertisementConfigured && bleAdvertisingController->start();
 }
 
+bool setCameraControl(const String& setting, int value) {
+  sensor_t* sensor = esp_camera_sensor_get();
+  if (!cameraReady || sensor == nullptr) {
+    return false;
+  }
+  if (setting == "brightness" && value >= -2 && value <= 2) {
+    cameraBrightness = value;
+    return sensor->set_brightness(sensor, value) == 0;
+  }
+  if (setting == "contrast" && value >= -2 && value <= 2) {
+    cameraContrast = value;
+    return sensor->set_contrast(sensor, value) == 0;
+  }
+  if (setting == "saturation" && value >= -2 && value <= 2) {
+    cameraSaturation = value;
+    return sensor->set_saturation(sensor, value) == 0;
+  }
+  if (setting == "sharpness" && value >= -2 && value <= 2) {
+    cameraSharpness = value;
+    return sensor->set_sharpness(sensor, value) == 0;
+  }
+  if (setting == "exposure" && value >= -2 && value <= 2) {
+    cameraAeLevel = value;
+    return sensor->set_ae_level(sensor, value) == 0;
+  }
+  if (setting == "quality" && value >= 4 && value <= 63) {
+    cameraJpegQuality = value;
+    return sensor->set_quality(sensor, value) == 0;
+  }
+  return false;
+}
+
 void processCommand(const String& rawCommand) {
   String command = rawCommand;
   command.trim();
@@ -542,6 +678,10 @@ void processCommand(const String& rawCommand) {
   }
   if (command == "STATUS") {
     publishTelemetry();
+    return;
+  }
+  if (command.startsWith("GPIO READ\t") || command.startsWith("GPIO WRITE\t") || command.startsWith("ADC READ\t")) {
+    processControlCommand(command);
     return;
   }
   if (command == "BLE ON") {
@@ -572,6 +712,14 @@ void processCommand(const String& rawCommand) {
   if (command == "INTERNET TEST") {
     testInternetConnection();
     publishTelemetry();
+    return;
+  }
+  if (command.startsWith("CAMERA\t")) {
+    const int separator = command.indexOf('\t', 7);
+    if (separator > 7) {
+      setCameraControl(command.substring(7, separator), command.substring(separator + 1).toInt());
+      publishTelemetry();
+    }
     return;
   }
   if (command.startsWith("DEVICE\t")) {
@@ -666,12 +814,13 @@ void setup() {
   const uint64_t mac = ESP.getEfuseMac();
   char suffix[5];
   snprintf(suffix, sizeof(suffix), "%04X", static_cast<uint16_t>(mac & 0xFFFF));
-  loadDeviceConfiguration("LUMNI-IOT-" + String(suffix));
+  loadDeviceConfiguration("XIAO-ESP32S3-SENSE-" + String(suffix));
 
   cameraMutex = xSemaphoreCreateMutex();
   cameraReady = initCamera();
 
   WiFi.mode(WIFI_AP_STA);
+  WiFi.setSleep(false);
   setWifiAccessPoint(true);
   connectStoredWifi();
   startBle();

@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ai-api/requirements*.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: react-app/package-lock.json
+      - name: Install Python dependencies
+        shell: pwsh
+        run: python -m pip install -r ai-api\requirements-dev.txt
+      - name: Install isolated hardware toolchains
+        shell: pwsh
+        run: |
+          python -m venv .tool-venv
+          .\.tool-venv\Scripts\python.exe -m pip install -r ai-api\requirements-tools.txt
+      - name: Install React dependencies
+        working-directory: react-app
+        run: npm ci
+      - name: Backend regression
+        working-directory: ai-api
+        run: python -m pytest -q
+      - name: Python dependency integrity
+        run: python -m pip check
+      - name: Python vulnerability audit
+        run: python -m pip_audit -r ai-api\requirements.txt
+      - name: Isolated hardware-tool vulnerability audit
+        shell: pwsh
+        run: >-
+          python -m pip_audit --path .tool-venv\Lib\site-packages
+          --ignore-vuln PYSEC-2026-2132
+          --ignore-vuln PYSEC-2026-1941
+          --ignore-vuln PYSEC-2026-1942
+          --ignore-vuln PYSEC-2026-161
+          --ignore-vuln PYSEC-2026-2281
+          --ignore-vuln PYSEC-2026-2280
+          --ignore-vuln PYSEC-2026-249
+          --ignore-vuln PYSEC-2026-248
+      - name: React type safety
+        working-directory: react-app
+        run: npm run check
+      - name: React production bundle and startup budget
+        working-directory: react-app
+        run: |
+          npm run build
+          npm run verify:bundle
+      - name: React production dependency audit
+        working-directory: react-app
+        run: npm audit --omit=dev --audit-level=high
+      - name: Source privacy
+        run: python ai-api\scripts\check_source_privacy.py
+      - name: Generate CycloneDX SBOMs
+        shell: pwsh
+        run: |
+          python -m pytest -q scripts\test_dependency_inventory.py
+          .\scripts\generate-sbom.ps1
+      - name: Upload CycloneDX SBOMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyclone-dx-sboms
+          path: |
+            artifacts/sbom/*.cdx.json
+            artifacts/dependency-inventory.json
+          if-no-files-found: error

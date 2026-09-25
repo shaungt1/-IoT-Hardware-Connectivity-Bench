@@ -1,9 +1,17 @@
 .venv/
+.tool-venv/
 .tools/
+.env
+.env.*
+!.env.example
 .pytest_cache/
 __pycache__/
 *.py[cod]
 ai-api/data/*.db*
+ai-api/*.log
+ai-api/.coverage*
+coverage/
+artifacts/
 react-app/node_modules/
 react-app/dist/
 react-app/artifacts/

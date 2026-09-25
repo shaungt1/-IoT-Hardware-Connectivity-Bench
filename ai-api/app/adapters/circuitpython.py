@@ -13,6 +13,8 @@ from typing import Any
 import psutil
 import serial
 
+from .base import AdapterManifest
+
 
 SUPPORTED_USB_IDS = {("239A", "8023")}
 _PROBE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -281,6 +283,16 @@ def _peripherals(addresses: list[int]) -> list[dict[str, Any]]:
 class CircuitPythonAdapter:
     adapter_id = "circuitpython"
     name = "CircuitPython USB runtime"
+    manifest = AdapterManifest(
+        id=adapter_id,
+        name=name,
+        version="1.0",
+        transports=("USB serial", "mounted storage"),
+        families=("CircuitPython", "SAMD", "RP2040", "nRF52", "ESP32"),
+        inspection_modes=("passive", "disruptive"),
+        timeout_seconds=20,
+        safety="Reads mounted metadata passively; REPL probes are opt-in and reload the existing program without writing files.",
+    )
 
     def supports(self, profile: dict[str, Any]) -> bool:
         identity = (str(profile.get("vid", "")).upper(), str(profile.get("pid", "")).upper())

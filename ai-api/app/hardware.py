@@ -8,11 +8,8 @@ import socket
 import subprocess
 import time
 import urllib.request
-from dataclasses import dataclass
 from threading import Lock
 from typing import Any
-
-import paramiko
 
 
 LICHEE_USB_ID = ("359F", "2120")
@@ -160,11 +157,6 @@ def _http_title(url: str) -> str | None:
         return None
 
 
-def _ssh_command(client: paramiko.SSHClient, command: str) -> str:
-    _, stdout, _ = client.exec_command(command, timeout=5)
-    return stdout.read().decode("utf-8", "replace").strip().replace("\x00", "")
-
-
 SAFE_TARGET_COMMANDS = {
     "system_summary": ("System summary", "uname -a; printf '\n'; cat /etc/os-release 2>/dev/null"),
     "network_interfaces": ("Network interfaces", "ip -brief address 2>/dev/null || ifconfig 2>/dev/null"),
@@ -180,75 +172,7 @@ def run_usb_network_diagnostic(identifier: str, command_id: str) -> dict[str, An
         raise ValueError("USB network device is no longer available")
     if command_id not in SAFE_TARGET_COMMANDS:
         raise ValueError("Diagnostic command is not in the read-only allowlist")
-    if not device.get("is_lichee"):
-        raise ValueError("This target has no compatible authenticated diagnostic adapter")
-    label, command = SAFE_TARGET_COMMANDS[command_id]
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    try:
-        client.connect(
-            str(device["ip_address"]),
-            username="root",
-            password="root",
-            timeout=3,
-            banner_timeout=3,
-            auth_timeout=3,
-        )
-        output = _ssh_command(client, command)
-        return {
-            "command_id": command_id,
-            "label": label,
-            "target": device["ip_address"],
-            "output": output or "Command completed with no output.",
-            "risk": "read-only",
-        }
-    except (OSError, paramiko.SSHException) as error:
-        raise ValueError(f"Target diagnostic failed: {error}") from error
-    finally:
-        client.close()
-
-
-def _lichee_telemetry(host: str) -> dict[str, Any]:
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    try:
-        client.connect(
-            host,
-            username="root",
-            password="root",
-            timeout=3,
-            banner_timeout=3,
-            auth_timeout=3,
-        )
-        hostname = _ssh_command(client, "hostname")
-        kernel = _ssh_command(client, "uname -r")
-        os_name = _ssh_command(client, ". /etc/os-release 2>/dev/null; echo ${PRETTY_NAME:-Linux}")
-        model = _ssh_command(client, "cat /proc/device-tree/model 2>/dev/null")
-        uptime = _ssh_command(client, "cut -d. -f1 /proc/uptime")
-        memory = _ssh_command(client, "awk '/MemAvailable:/ {print $2 * 1024}' /proc/meminfo")
-        wifi = _ssh_command(client, "ip -brief address show wlan0 2>/dev/null | tr -s ' '")
-        i2c_adapters = _ssh_command(client, "i2cdetect -l 2>/dev/null")
-        media_devices = _ssh_command(client, "for path in /dev/video* /dev/media*; do [ -e \"$path\" ] && echo \"$path\"; done")
-        camera_detected = bool(media_devices)
-        return {
-            "ssh_authenticated": True,
-            "device": "LicheeRV Nano + PicoClaw",
-            "hostname": hostname,
-            "model": model or "LicheeRV Nano",
-            "firmware": os_name,
-            "kernel": kernel,
-            "uptime_ms": int(uptime or 0) * 1000,
-            "free_heap_bytes": int(memory or 0),
-            "camera_ready": camera_detected,
-            "camera_status": "GC4653 detected" if camera_detected else "GC4653 configured; sensor not detected",
-            "wifi_interface": wifi or "wlan0 unavailable",
-            "i2c_adapters": i2c_adapters,
-            "media_devices": media_devices,
-        }
-    except (OSError, paramiko.SSHException, ValueError):
-        return {"ssh_authenticated": False}
-    finally:
-        client.close()
+    raise ValueError("Enroll this Linux board with its verified SSH host-key fingerprint before running diagnostics")
 
 
 def inspect_usb_network_device(identifier: str) -> dict[str, Any]:
@@ -258,7 +182,6 @@ def inspect_usb_network_device(identifier: str) -> dict[str, Any]:
     host = str(device["ip_address"])
     ssh_open = _tcp_open(host, 22)
     web_title = _http_title(str(device["web_url"])) if device.get("web_url") else None
-    telemetry = _lichee_telemetry(host) if device.get("is_lichee") and ssh_open else {}
     return {
         **device,
         "online": ssh_open or bool(web_title),
@@ -267,5 +190,9 @@ def inspect_usb_network_device(identifier: str) -> dict[str, Any]:
             "web": bool(web_title),
             "web_title": web_title,
         },
-        "telemetry": telemetry,
+        "telemetry": {
+            "ssh_authenticated": False,
+            "enrollment_required": ssh_open,
+            "enrollment_reason": "SSH credentials and host keys are never assumed from a USB identity",
+        },
     }

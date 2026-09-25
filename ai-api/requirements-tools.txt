@@ -1,0 +1,6 @@
+platformio==6.1.18
+setuptools==83.0.0
+esptool==5.4.0
+mpremote==1.29.0
+pyocd==0.45.1
+ltchiptool==4.14.4

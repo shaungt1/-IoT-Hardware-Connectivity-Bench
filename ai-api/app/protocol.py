@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-MAGIC = b"LMNI"
+MAGIC = b"IOTB"
+LEGACY_MAGICS = (b"LMNI",)
+ACCEPTED_MAGICS = (MAGIC, *LEGACY_MAGICS)
 HEADER_SIZE = 13
 PACKET_TELEMETRY = 1
 PACKET_JPEG = 2
@@ -26,11 +28,12 @@ class PacketParser:
         packets: list[Packet] = []
 
         while True:
-            marker = self._buffer.find(MAGIC)
-            if marker < 0:
+            markers = [(position, magic) for magic in ACCEPTED_MAGICS if (position := self._buffer.find(magic)) >= 0]
+            if not markers:
                 if len(self._buffer) > len(MAGIC) - 1:
                     del self._buffer[: -(len(MAGIC) - 1)]
                 break
+            marker, _ = min(markers, key=lambda match: match[0])
             if marker:
                 del self._buffer[:marker]
             if len(self._buffer) < HEADER_SIZE:
@@ -60,4 +63,3 @@ def encode_packet(packet_type: int, sequence: int, payload: bytes) -> bytes:
         + sequence.to_bytes(4, "little")
         + payload
     )
-

@@ -3,16 +3,19 @@ from __future__ import annotations
 import secrets
 import hashlib
 import json
+import os
+import signal
 import subprocess
-import sys
 import threading
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .storage import StateStore
+from .tool_paths import tool_executable
 from .workspace import DeviceWorkspace, WorkspaceError
 
 
@@ -47,6 +50,11 @@ class OperationManager:
         self.workspace = workspace
         self._plans: dict[str, OperationPlan] = {}
         self._locks: dict[str, threading.Lock] = {}
+        self._processes: dict[str, subprocess.Popen[str]] = {}
+        self._active_plans: dict[str, str] = {}
+        self._progress: dict[str, dict[str, Any]] = {}
+        self._cancelled: set[str] = set()
+        self._cancelled_plans: set[str] = set()
         self._guard = threading.Lock()
 
     def capabilities(self, profile: dict[str, Any], inspection: dict[str, Any]) -> list[dict[str, Any]]:
@@ -158,32 +166,174 @@ class OperationManager:
         if not lock.acquire(blocking=False):
             raise OperationError("Another operation is already using this target")
         started = time.time()
+        readers: list[threading.Thread] = []
         try:
+            with self._guard:
+                if identifier in self._cancelled:
+                    raise OperationError("The target is disconnected; reconnect it before running operations")
             if plan.operation_id == "workspace:write":
                 result = self.workspace.write_text(inspection=inspection, **plan.parameters)
                 output = f"Saved {result['path']} ({result['size']} bytes, sha256 {result['sha256']})."
                 return self._finish(plan, True, output, started)
             command = self._command(profile, inspection, plan.operation_id)
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 command,
                 cwd=self.root,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=180,
-                check=False,
+                bufsize=1,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+                start_new_session=os.name != "nt",
             )
-            output = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()[-OUTPUT_LIMIT:]
-            return self._finish(plan, completed.returncode == 0, output or "Operation completed without output.", started)
+            with self._guard:
+                if identifier in self._cancelled:
+                    self._terminate_process_tree(process)
+                self._processes[identifier] = process
+                self._active_plans[identifier] = plan.id
+                self._progress[identifier] = {
+                    "plan_id": plan.id,
+                    "identifier": identifier,
+                    "operation_id": plan.operation_id,
+                    "label": plan.label,
+                    "started_at": started,
+                    "updated_at": started,
+                    "output": "",
+                }
+            output_parts: deque[str] = deque(maxlen=2_000)
+            output_guard = threading.Lock()
+
+            def collect(stream) -> None:
+                if stream is None:
+                    return
+                for line in iter(stream.readline, ""):
+                    with output_guard:
+                        output_parts.append(line)
+                        tail = "".join(output_parts)[-OUTPUT_LIMIT:]
+                    with self._guard:
+                        progress = self._progress.get(identifier)
+                        if progress and progress["plan_id"] == plan.id:
+                            progress["output"] = tail
+                            progress["updated_at"] = time.time()
+
+            readers = [
+                threading.Thread(target=collect, args=(process.stdout,), daemon=True),
+                threading.Thread(target=collect, args=(process.stderr,), daemon=True),
+            ]
+            for reader in readers:
+                reader.start()
+            process.wait(timeout=180)
+            for reader in readers:
+                reader.join(timeout=2)
+            with output_guard:
+                output = "".join(output_parts).strip()[-OUTPUT_LIMIT:]
+            with self._guard:
+                cancelled = identifier in self._cancelled or plan.id in self._cancelled_plans
+            if cancelled:
+                return self._finish(plan, False, output or "Target disconnected; operation cancelled.", started, "cancelled")
+            return self._finish(plan, process.returncode == 0, output or "Operation completed without output.", started)
         except (OSError, subprocess.TimeoutExpired, WorkspaceError) as error:
+            with self._guard:
+                process = self._processes.get(identifier)
+            if process and process.poll() is None:
+                self._terminate_process_tree(process)
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+            for reader in readers:
+                reader.join(timeout=1)
             return self._finish(plan, False, str(error), started)
         finally:
+            with self._guard:
+                self._processes.pop(identifier, None)
+                self._active_plans.pop(identifier, None)
+                self._progress.pop(identifier, None)
+                self._cancelled_plans.discard(plan.id)
             lock.release()
 
     def history(self, identifier: str | None = None) -> list[dict[str, Any]]:
         return self.store.operation_history(identifier)
 
-    def _finish(self, plan: OperationPlan, passed: bool, output: str, started: float) -> dict[str, Any]:
-        status = "completed" if passed else "failed"
+    def cancel_identifier(self, identifier: str, reason: str = "Target disconnected") -> dict[str, Any]:
+        """Invalidate pending plans and stop an active child process for a removed target."""
+        with self._guard:
+            self._cancelled.add(identifier)
+            plans = [plan for plan in self._plans.values() if plan.identifier == identifier]
+            for plan in plans:
+                self._plans.pop(plan.id, None)
+            process = self._processes.get(identifier)
+        for plan in plans:
+            self.store.record_operation(plan.id, identifier, plan.operation_id, plan.risk, "cancelled", plan.preview, reason)
+        terminated = False
+        if process and process.poll() is None:
+            self._terminate_process_tree(process)
+            terminated = True
+        return {"identifier": identifier, "plans_cancelled": len(plans), "process_terminated": terminated}
+
+    def cancel_active(self, identifier: str, reason: str = "Cancelled by operator") -> dict[str, Any]:
+        """Cancel pending plans and an active process without marking the target disconnected."""
+        with self._guard:
+            plans = [plan for plan in self._plans.values() if plan.identifier == identifier]
+            active_plan_id = self._active_plans.get(identifier)
+            if active_plan_id:
+                self._cancelled_plans.add(active_plan_id)
+            pending = [plan for plan in plans if plan.id != active_plan_id]
+            for plan in pending:
+                self._plans.pop(plan.id, None)
+            process = self._processes.get(identifier)
+        for plan in pending:
+            self.store.record_operation(plan.id, identifier, plan.operation_id, plan.risk, "cancelled", plan.preview, reason)
+        terminated = False
+        if process and process.poll() is None:
+            self._terminate_process_tree(process)
+            terminated = True
+        return {
+            "identifier": identifier,
+            "plans_cancelled": len(pending) + (1 if active_plan_id else 0),
+            "process_terminated": terminated,
+        }
+
+    def mark_present(self, identifier: str) -> None:
+        with self._guard:
+            self._cancelled.discard(identifier)
+
+    @staticmethod
+    def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+        if process.poll() is not None:
+            return
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )
+            else:
+                os.killpg(process.pid, signal.SIGTERM)
+        except (OSError, subprocess.SubprocessError):
+            process.kill()
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._guard:
+            return {
+                "active_identifiers": sorted(self._processes),
+                "active": [dict(self._progress[identifier]) for identifier in sorted(self._progress)],
+                "disconnected_identifiers": sorted(self._cancelled),
+                "pending_plans": len(self._plans),
+            }
+
+    def _finish(
+        self,
+        plan: OperationPlan,
+        passed: bool,
+        output: str,
+        started: float,
+        status_override: str | None = None,
+    ) -> dict[str, Any]:
+        status = status_override or ("completed" if passed else "failed")
         self.store.record_operation(plan.id, plan.identifier, plan.operation_id, plan.risk, status, plan.preview, output)
         self._plans.pop(plan.id, None)
         return {
@@ -201,7 +351,10 @@ class OperationManager:
             project = (self.root / relative).resolve()
             if self.root not in project.parents or not (project / "platformio.ini").is_file():
                 raise OperationError("The firmware project is outside the bench workspace")
-            command = [sys.executable, "-m", "platformio", "run", "-d", str(project)]
+            executable = tool_executable("platformio")
+            if not executable:
+                raise OperationError("PlatformIO is not installed in the bench tool environment")
+            command = [executable, "run", "-d", str(project)]
             if operation_id.startswith("flash:"):
                 command.extend(["--target", "upload", "--upload-port", str(profile.get("device") or "")])
             return command
@@ -209,7 +362,10 @@ class OperationManager:
             size = self._flash_bytes(str((inspection.get("telemetry") or {}).get("flash_size") or ""))
             destination = self.root / ".artifacts" / "backups" / f"{profile.get('device')}-{int(time.time())}.bin"
             destination.parent.mkdir(parents=True, exist_ok=True)
-            return [sys.executable, "-m", "esptool", "--port", str(profile.get("device")), "read-flash", "0", str(size), str(destination)]
+            executable = tool_executable("esptool")
+            if not executable:
+                raise OperationError("esptool is not installed in the bench tool environment")
+            return [executable, "--port", str(profile.get("device")), "read-flash", "0", str(size), str(destination)]
         raise OperationError("The operation has no executable adapter")
 
     def _preview(self, profile: dict[str, Any], inspection: dict[str, Any], operation_id: str) -> str:
@@ -245,19 +401,11 @@ class OperationManager:
 
     @staticmethod
     def _platformio_available() -> bool:
-        try:
-            import platformio  # noqa: F401
-            return True
-        except ImportError:
-            return False
+        return tool_executable("platformio") is not None
 
     @staticmethod
     def _esptool_available() -> bool:
-        try:
-            import esptool  # noqa: F401
-            return True
-        except ImportError:
-            return False
+        return tool_executable("esptool") is not None
 
     @staticmethod
     def _flash_bytes(value: str) -> int:

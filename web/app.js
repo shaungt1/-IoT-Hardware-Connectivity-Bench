@@ -904,15 +904,15 @@ function renderBleDevices(devices = []) {
       "bluetooth",
       device.name,
       `${device.address} | ${device.rssi_dbm} dBm | ${signalQuality(device.rssi_dbm)}`,
-      saved.has(device.address) ? "Saved" : device.is_lumni ? "LUMNI" : "Nearby",
+      saved.has(device.address) ? "Saved" : device.is_compatible ? "IoT Bench" : "Nearby",
     );
     row.classList.toggle("selected", state.selectedBleAddress === device.address);
     row.addEventListener("click", () => {
       state.selectedBleAddress = device.address;
-      byId("ble-connect").disabled = !device.is_lumni;
-      byId("ble-rssi").textContent = device.is_lumni
+      byId("ble-connect").disabled = !device.is_compatible;
+      byId("ble-rssi").textContent = device.is_compatible
         ? `${device.name} selected; ready for GATT verification`
-        : `${device.name} selected; discovery only because it is not a LUMNI test service`;
+        : `${device.name} selected; discovery only because it does not expose a compatible IoT Bench test service`;
       state.bleDevicesSignature = "";
       renderBleDevices(devices);
     });
@@ -1391,7 +1391,7 @@ async function verifyBle() {
   const button = byId("ble-connect");
   button.disabled = true;
   setProgress("ble-progress", true);
-  byId("ble-command-status").textContent = "Opening the selected LUMNI GATT service and reading status...";
+  byId("ble-command-status").textContent = "Opening the selected IoT Bench GATT service and reading status...";
   try {
     const response = await fetch("/api/ble/connect", { method: "POST" });
     const body = await response.json();

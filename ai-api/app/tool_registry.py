@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import importlib.metadata
+import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .device_intelligence import arduino_cli_path
+from .tool_paths import tool_executable
 
 
 TOOLS = (
@@ -16,7 +19,7 @@ TOOLS = (
     {"id": "zeroconf", "name": "Zeroconf", "category": "Network discovery", "risk": "passive", "package": "zeroconf"},
     {"id": "pyserial", "name": "pySerial", "category": "Serial transport", "risk": "read-only", "package": "pyserial"},
     {"id": "bleak", "name": "Bleak", "category": "Bluetooth LE", "risk": "read-only", "package": "bleak"},
-    {"id": "platformio", "name": "PlatformIO Core", "category": "Build and flash", "risk": "destructive", "module": "platformio"},
+    {"id": "platformio", "name": "PlatformIO Core", "category": "Build and flash", "risk": "destructive", "command": "platformio"},
     {"id": "arduino-cli", "name": "Arduino CLI", "category": "Build and flash", "risk": "destructive", "command": "arduino-cli"},
     {"id": "esptool-inspect", "name": "esptool ROM identification", "category": "Espressif processor and flash identification", "risk": "disruptive", "command": "esptool", "package": "esptool"},
     {"id": "esptool-flash", "name": "esptool flashing", "category": "Espressif firmware flash", "risk": "destructive", "command": "esptool", "package": "esptool"},
@@ -49,6 +52,11 @@ TOOLS = (
     {"id": "west", "name": "Zephyr west", "category": "Zephyr board metadata, build, and flash", "risk": "destructive", "command": "west"},
     {"id": "fritzing", "name": "Fritzing", "category": "Breadboard and wiring documentation", "risk": "read-only", "command": "Fritzing"},
     {"id": "circuitjs", "name": "CircuitJS", "category": "Circuit simulation; not physical discovery", "risk": "passive"},
+    {"id": "ngspice", "name": "ngspice", "category": "SPICE electrical simulation", "risk": "passive", "command": "ngspice"},
+    {"id": "binwalk", "name": "Binwalk", "category": "Firmware signatures and extraction", "risk": "read-only", "command": "binwalk"},
+    {"id": "rizin", "name": "Rizin", "category": "Firmware binary analysis", "risk": "read-only", "command": "rizin"},
+    {"id": "ghidra", "name": "Ghidra", "category": "Firmware decompilation and processor analysis", "risk": "read-only", "command": "ghidraRun"},
+    {"id": "emba", "name": "EMBA", "category": "Firmware filesystem and SBOM analysis", "risk": "read-only", "command": "emba"},
     {"id": "wsl", "name": "Windows Subsystem for Linux", "category": "Linux tools", "risk": "read-only", "command": "wsl"},
 )
 
@@ -56,6 +64,52 @@ PLATFORMIO_COMMANDS = {
     "openocd": ("tool-openocd/bin/openocd.exe", "tool-openocd-esp32/bin/openocd.exe"),
     "bossac": ("tool-bossac-nordicnrf52/bossac.exe",),
     "dfu-util": ("tool-stm32duino/dfu-util.exe", "tool-stm32duino/dfu-util-0.9-win64/dfu-util.exe"),
+}
+
+LOCAL_COMMANDS = {
+    "ngspice": (".tools/ngspice46/Spice64/bin/ngspice_con.exe", ".tools/ngspice/Spice64/bin/ngspice_con.exe"),
+    "renode": (".tools/renode/renode_1.17.0-portable/renode.exe",),
+}
+
+DIAGNOSTIC_ARGS = {
+    "platformio": ("--version",),
+    "arduino-cli": ("version",),
+    "esptool-inspect": ("version",),
+    "esptool-flash": ("version",),
+    "mpremote": ("--version",),
+    "openocd": ("--version",),
+    "pyocd": ("--version",),
+    "avrdude": ("-?",),
+    "dfu-util": ("--version",),
+    "bossac": ("--help",),
+    "picotool": ("version",),
+    "nrfutil": ("--version",),
+    "hailortcli": ("--version",),
+    "nvidia-smi": ("--query-gpu=name,driver_version", "--format=csv,noheader"),
+    "hackrf-info": ("-v",),
+    "usbipd": ("--version",),
+    "ffprobe": ("-version",),
+    "sigrok-cli": ("--version",),
+    "renode": ("--version",),
+    "kicad-cli": ("version",),
+    "west": ("--version",),
+    "ngspice": ("-v",),
+    "binwalk": ("--version",),
+    "rizin": ("-v",),
+    "wsl": ("--version",),
+}
+
+DOCUMENTATION = {
+    "arduino-cli": "https://arduino.github.io/arduino-cli/",
+    "platformio": "https://docs.platformio.org/en/latest/core/index.html",
+    "esptool-inspect": "https://docs.espressif.com/projects/esptool/en/latest/",
+    "esptool-flash": "https://docs.espressif.com/projects/esptool/en/latest/",
+    "ngspice": "https://ngspice.sourceforge.io/docs.html",
+    "renode": "https://renode.readthedocs.io/en/latest/",
+    "kicad-cli": "https://docs.kicad.org/",
+    "sigrok-cli": "https://sigrok.org/wiki/Sigrok-cli",
+    "pyusb": "https://pyusb.github.io/pyusb/",
+    "bleak": "https://bleak.readthedocs.io/",
 }
 
 
@@ -83,11 +137,12 @@ def _module_version(module: str) -> str | None:
 
 
 def _command_path(command: str) -> str | None:
-    resolved = shutil.which(command)
+    resolved = tool_executable(command)
     if resolved:
         return resolved
-    scripts = Path(sys.executable).parent
-    for candidate in (scripts / command, scripts / f"{command}.exe", scripts / f"{command}.cmd"):
+    project_root = Path(__file__).resolve().parents[2]
+    for relative in LOCAL_COMMANDS.get(command, ()):
+        candidate = project_root / relative
         if candidate.is_file():
             return str(candidate)
     platformio_home = Path.home() / ".platformio" / "packages"
@@ -95,6 +150,19 @@ def _command_path(command: str) -> str | None:
         candidate = platformio_home / relative
         if candidate.is_file():
             return str(candidate)
+    return None
+
+
+def _local_bundle_version(command: str | None, path: str | None) -> str | None:
+    if not command or not path:
+        return None
+    normalized = path.replace("\\", "/")
+    if command == "ngspice":
+        match = re.search(r"/ngspice(\d+)/", normalized, re.IGNORECASE)
+        return match.group(1) if match else None
+    if command == "renode":
+        match = re.search(r"/renode[_-]([0-9.]+)-portable/", normalized, re.IGNORECASE)
+        return match.group(1) if match else None
     return None
 
 
@@ -107,12 +175,15 @@ def tool_registry() -> dict:
         command = record.get("command")
         path = arduino_cli_path() if command == "arduino-cli" else _command_path(command) if command else None
         version = _package_version(package) if package else _module_version(module) if module else None
+        version = version or _local_bundle_version(command, path)
         record.update(
             {
                 "available": bool(version or path),
                 "version": version,
                 "path": path,
                 "capability": "active" if version or path else "planned",
+                "diagnostic_supported": bool(version or record["id"] in DIAGNOSTIC_ARGS),
+                "documentation_url": DOCUMENTATION.get(record["id"]),
             }
         )
         tools.append(record)
@@ -126,3 +197,45 @@ def tool_registry() -> dict:
         "available_count": sum(1 for item in tools if item["available"]),
         "tools": tools,
     }
+
+
+def diagnose_tool(tool_id: str) -> dict:
+    registry = tool_registry()
+    tool = next((item for item in registry["tools"] if item["id"] == tool_id), None)
+    if tool is None:
+        raise ValueError("Unknown tool identifier")
+    report = {
+        "tool": tool,
+        "available": tool["available"],
+        "diagnostic_ran": False,
+        "exit_code": None,
+        "output": f"{tool['name']} {tool['version']}" if tool.get("version") else "",
+        "duration_ms": 0,
+        "physical_hardware_changed": False,
+        "route": "Firmware & files" if tool["risk"] in {"disruptive", "destructive"} else "Tools & sources",
+    }
+    if not tool["available"]:
+        report["output"] = "Tool is not installed or is not discoverable on this host."
+        return report
+    if tool.get("version"):
+        report["diagnostic_ran"] = True
+        return report
+    args = DIAGNOSTIC_ARGS.get(tool_id)
+    path = tool.get("path")
+    if not args or not path:
+        report["output"] = "Executable path is present; no passive version probe is defined."
+        return report
+    started = time.perf_counter()
+    try:
+        result = subprocess.run([path, *args], capture_output=True, text=True, timeout=8, check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        report["output"] = f"Diagnostic failed: {error}"
+        report["duration_ms"] = round((time.perf_counter() - started) * 1000)
+        return report
+    report.update({
+        "diagnostic_ran": True,
+        "exit_code": result.returncode,
+        "output": ((result.stdout or "") + (result.stderr or "")).strip()[:4000],
+        "duration_ms": round((time.perf_counter() - started) * 1000),
+    })
+    return report

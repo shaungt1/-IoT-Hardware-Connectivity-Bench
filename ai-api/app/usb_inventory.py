@@ -5,6 +5,8 @@ import os
 import platform
 import re
 import subprocess
+import threading
+import time
 from typing import Any
 
 import libusb_package
@@ -37,6 +39,9 @@ KNOWN_USB_DEVICES = {
 }
 
 PNP_CLASS_PRIORITY = {"Ports": 8, "Camera": 7, "MEDIA": 6, "Display": 5, "USB": 4, "HIDClass": 2}
+_pnp_cache_lock = threading.Lock()
+_pnp_cache_at = 0.0
+_pnp_cache: dict[tuple[str, str], dict[str, Any]] = {}
 
 POWERSHELL_PNP_QUERY = r"""
 @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
@@ -56,29 +61,36 @@ POWERSHELL_PNP_QUERY = r"""
 """
 
 
-def _windows_pnp_inventory() -> dict[tuple[str, str], dict[str, Any]]:
+def _windows_pnp_inventory(cache_seconds: float = 60.0) -> dict[tuple[str, str], dict[str, Any]]:
+    global _pnp_cache_at, _pnp_cache
     if platform.system() != "Windows":
         return {}
-    powershell = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-    try:
-        result = subprocess.run(
-            [powershell, "-NoProfile", "-NonInteractive", "-Command", POWERSHELL_PNP_QUERY],
-            capture_output=True,
-            text=True,
-            timeout=8,
-            check=True,
-        )
-        payload = json.loads(result.stdout or "[]")
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
-        return {}
-    rows = payload if isinstance(payload, list) else [payload]
-    grouped: dict[tuple[str, str], dict[str, Any]] = {}
-    for row in rows:
-        key = (str(row.get("vendor_id", "")).upper(), str(row.get("product_id", "")).upper())
-        current = grouped.get(key)
-        if current is None or PNP_CLASS_PRIORITY.get(str(row.get("class_name")), 0) > PNP_CLASS_PRIORITY.get(str(current.get("class_name")), 0):
-            grouped[key] = row
-    return grouped
+    with _pnp_cache_lock:
+        now = time.monotonic()
+        if _pnp_cache and now - _pnp_cache_at < cache_seconds:
+            return {key: dict(value) for key, value in _pnp_cache.items()}
+        powershell = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+        try:
+            result = subprocess.run(
+                [powershell, "-NoProfile", "-NonInteractive", "-Command", POWERSHELL_PNP_QUERY],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                check=True,
+            )
+            payload = json.loads(result.stdout or "[]")
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+            return {key: dict(value) for key, value in _pnp_cache.items()}
+        rows = payload if isinstance(payload, list) else [payload]
+        grouped: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in rows:
+            key = (str(row.get("vendor_id", "")).upper(), str(row.get("product_id", "")).upper())
+            current = grouped.get(key)
+            if current is None or PNP_CLASS_PRIORITY.get(str(row.get("class_name")), 0) > PNP_CLASS_PRIORITY.get(str(current.get("class_name")), 0):
+                grouped[key] = row
+        _pnp_cache = grouped
+        _pnp_cache_at = now
+        return {key: dict(value) for key, value in grouped.items()}
 
 
 def _classification(kind: str, device_class: int, pnp_class: str | None) -> str:

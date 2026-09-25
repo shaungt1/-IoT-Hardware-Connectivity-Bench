@@ -1,4 +1,4 @@
-from app.device_intelligence import enrich_hardware_list, inspect_hardware
+from app.device_intelligence import apply_runtime_identity, enrich_hardware_list, inspect_hardware
 
 
 def nano_profile() -> dict:
@@ -126,3 +126,106 @@ def test_raw_usb_device_keeps_host_classification_during_inspection(monkeypatch)
     assert result["model"] == "Logitech MX Brio"
     assert result["classification"] == "camera_peripheral"
     assert {item["id"] for item in result["capabilities"]} == {"usb", "camera"}
+
+
+def test_compatible_runtime_merges_camera_ble_wifi_and_health_tests(monkeypatch) -> None:
+    monkeypatch.setattr("app.device_intelligence.arduino_board_inventory", lambda force=False: {})
+    profile = {
+        "id": "serial:COM6",
+        "kind": "serial",
+        "device": "COM6",
+        "name": "USB JTAG/serial debug unit",
+        "vid": "303A",
+        "pid": "1001",
+    }
+    live = {
+        "telemetry": {
+            "device": "XIAO-ESP32S3-SENSE-TEST",
+            "firmware": "iot-test-0.4.1",
+            "camera_ready": True,
+            "camera_sensor_pid": 0x60,
+            "ble_advertising": True,
+            "wifi_ap_active": True,
+            "wifi_station_connected": True,
+        }
+    }
+
+    result = inspect_hardware(profile, live=live)
+
+    capability_ids = {item["id"] for item in result["capabilities"]}
+    component_ids = {item["id"] for item in result["components"]}
+    tests = {item["id"]: item for item in result["tests"]}
+    assert {"camera", "ble", "wifi_24"} <= capability_ids
+    assert {"runtime_camera", "runtime_ble_radio", "runtime_wifi_radio"} <= component_ids
+    assert result["runtime"] == "iot-test-0.4.1"
+    assert tests["camera_stream"]["available"] is True
+    assert tests["ble_runtime"]["available"] is True
+    assert tests["wifi_runtime"]["available"] is True
+
+
+def test_authenticated_xiao_runtime_replaces_generic_espressif_family(monkeypatch) -> None:
+    monkeypatch.setattr("app.device_intelligence.arduino_board_inventory", lambda force=False: {})
+    profile = {
+        "id": "serial:COM6",
+        "kind": "serial",
+        "device": "COM6",
+        "name": "Espressif ESP32 USB JTAG/serial family",
+        "vid": "303A",
+        "pid": "1001",
+    }
+    live = {
+        "telemetry": {
+            "device": "XIAO-ESP32S3-SENSE-61C0",
+            "firmware": "iot-bench-0.5.0",
+            "board_id": "seeed_xiao_esp32s3_sense",
+            "board_model": "Seeed Studio XIAO ESP32-S3 Sense",
+            "mcu": "Espressif ESP32-S3R8",
+            "architecture": "Xtensa LX7 dual-core",
+            "pin_map_version": "seeed-xiao-esp32s3-sense-v1",
+            "camera_ready": True,
+            "camera_sensor_pid": 0x60,
+            "psram_bytes": 8_388_608,
+            "ble_advertising": True,
+            "wifi_ap_active": True,
+        }
+    }
+
+    result = inspect_hardware(profile, live=live)
+
+    assert result["model"] == "Seeed Studio XIAO ESP32-S3 Sense"
+    assert result["mcu"] == "Espressif ESP32-S3R8"
+    assert result["confidence"] == 0.99
+    assert len(result["pins"]) == 14
+    assert [pin["name"] for pin in result["pins"][:2]] == ["D0", "D1"]
+    assert result["pins"][0]["electrical"]["absolute_input_max_v"] == 3.6
+    assert result["pins"][0]["electrical"]["five_volt_tolerant"] is False
+    assert next(pin for pin in result["pins"] if pin["name"] == "5V")["electrical"]["rail"] == "USB VBUS"
+    assert {"sense_camera", "sense_microphone", "sense_microsd", "psram_8mb"} <= {
+        component["id"] for component in result["components"]
+    }
+
+
+def test_authenticated_runtime_promotes_host_inventory_identity() -> None:
+    inventory = [{
+        "id": "serial:COM6",
+        "kind": "serial",
+        "device": "COM6",
+        "name": "Espressif ESP32 USB JTAG/serial family",
+        "confidence": 0.82,
+    }]
+    snapshot = {
+        "connected": True,
+        "port": "COM6",
+        "telemetry": {
+            "device": "XIAO-ESP32S3-SENSE-TEST",
+            "board_id": "seeed_xiao_esp32s3_sense",
+            "board_model": "Seeed Studio XIAO ESP32-S3 Sense",
+        },
+    }
+
+    result = apply_runtime_identity(inventory, snapshot)
+
+    assert result[0]["name"] == "Seeed Studio XIAO ESP32-S3 Sense"
+    assert result[0]["runtime_identity_verified"] is True
+    assert result[0]["confidence"] == 0.99
+    assert inventory[0]["name"] == "Espressif ESP32 USB JTAG/serial family"

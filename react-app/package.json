@@ -4,14 +4,23 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "build": "tsc -b && vite build",
+    "verify:bundle": "node scripts/verify-bundle.mjs",
     "preview": "vite preview --host 127.0.0.1",
-    "check": "tsc -b --pretty false"
+    "check": "tsc -b --pretty false",
+    "verify:live": "node scripts/verify-live-device.mjs",
+    "verify:phase-one": "node scripts/verify-phase-one.mjs",
+    "verify:soak": "node scripts/verify-camera-soak.mjs",
+    "verify:prototype": "node scripts/verify-prototype-studio.mjs",
+    "verify:workspaces": "node scripts/verify-workspaces.mjs"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@wokwi/elements": "^1.9.2",
+    "@xyflow/react": "^12.12.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.544.0",

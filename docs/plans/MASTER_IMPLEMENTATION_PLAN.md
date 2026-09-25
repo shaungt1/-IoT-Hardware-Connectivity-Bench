@@ -258,6 +258,11 @@ Exit criteria:
 
 - A Feather/ESP-class board and sensor can be wired, validated, saved, reopened, and exported without
   losing pin or source semantics.
+
+Implementation started 2026-09-24: schema `1.0`, SQLite project persistence, React Flow canvas,
+selected-device seed, simulated sensor/LED parts, structured pin endpoint wiring, provenance display,
+save/reopen, and graph contract tests are present. Constraint validation, revision history, catalogs,
+live adapter binding, simulation, and instruments remain required before this phase can pass.
 - Invalid voltage, output contention, address collision, reserved pin, and missing ground are blocked
   or prominently warned.
 - A 1,000-node graph meets interaction/performance and accessibility budgets.
